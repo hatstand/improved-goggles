@@ -2,9 +2,11 @@ use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context, Result};
+use num_bigint_dig::BigUint;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
-use rsa::{Pkcs1v15Sign, RsaPrivateKey};
+use rsa::traits::PublicKeyParts;
+use rsa::RsaPrivateKey;
 use sha1::{Digest, Sha1};
 
 /// Metadata extracted from ACSM file (Dublin Core elements)
@@ -541,18 +543,46 @@ fn hash_xml_document(xml: &str) -> Result<Vec<u8>> {
 /// # Returns
 /// Base64-encoded RSA signature
 pub fn sign_fulfill_request(xml: &str, private_key: &RsaPrivateKey) -> Result<String> {
+    use rsa::traits::PrivateKeyParts;
+
     // Hash the XML using Adobe's algorithm
     let hash = hash_xml_document(xml)?;
 
-    // Sign the hash using textbook RSA (PKCS#1 v1.5)
-    let signature = private_key
-        .sign(Pkcs1v15Sign::new_unprefixed(), &hash)
-        .context("Failed to sign hash")?;
+    // Pad the message using PKCS#1 v1.5 format: 00 01 FF...FF 00 MESSAGE
+    let key_size = private_key.size();
+    let max_message_length = key_size - 11;
+    if hash.len() > max_message_length {
+        bail!(
+            "Hash too long: {} bytes, max is {} bytes",
+            hash.len(),
+            max_message_length
+        );
+    }
+
+    let padding_len = key_size - hash.len() - 3;
+    let mut padded_message = Vec::with_capacity(key_size);
+    padded_message.push(0x00);
+    padded_message.push(0x01);
+    padded_message.extend(vec![0xFF; padding_len]);
+    padded_message.push(0x00);
+    padded_message.extend_from_slice(&hash);
+
+    // Convert padded message to BigUint (big-endian)
+    let message = BigUint::from_bytes_be(&padded_message);
+
+    // Perform raw RSA (textbook RSA): signature = message^d mod n
+    // Adobe ADEPT uses raw RSA with manual PKCS#1 v1.5 padding
+    let signature = message.modpow(private_key.d(), private_key.n());
+
+    // Convert signature to bytes (big-endian), pad to key size
+    let sig_bytes = signature.to_bytes_be();
+    let mut final_sig = vec![0u8; key_size - sig_bytes.len()];
+    final_sig.extend_from_slice(&sig_bytes);
 
     // Return base64-encoded signature
     Ok(base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
-        signature,
+        &final_sig,
     ))
 }
 

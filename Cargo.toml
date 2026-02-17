@@ -20,6 +20,7 @@ flate2 = "1.0"
 hex = "0.4.3"
 jiff = "0.2.20"
 log = "0.4.29"
+num-bigint-dig = "0.8"
 quick-xml = "0.37"
 reqwest = { version = "0.12", features = ["blocking"] }
 roxmltree = "0.21.1"
