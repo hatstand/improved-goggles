@@ -698,7 +698,7 @@ mod tests {
 
         // Load device key
         let device_key_bytes =
-            std::fs::read("adept_key.der").expect("Failed to read device_key.der");
+            std::fs::read("src/testdata/adept_key.der").expect("Failed to read device_key.der");
         let private_key =
             RsaPrivateKey::from_pkcs1_der(&device_key_bytes).expect("Failed to parse device key");
 
