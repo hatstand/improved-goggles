@@ -11,19 +11,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Adobe Adept Key Retrieval v0.1.0");
         println!("Rust implementation based on DeDRM_tools\n");
 
+        let args = std::env::args().collect::<Vec<String>>();
+
         match adeptkeys() {
-            Ok(keys) => {
-                println!("\nSuccessfully retrieved {} key(s)\n", keys.len());
+            Ok(key) => {
+                println!("Successfully retrieved key");
 
-                // Save keys to files
-                let output_dir = PathBuf::from(".");
+                if args.len() > 1 {
+                    use rmpub::extract_epub_key;
 
-                for (index, key) in keys.iter().enumerate() {
-                    let filename = format!("adobekey{}_uuid_{}.der", index + 1, key.name);
-                    let filepath = output_dir.join(&filename);
-
-                    fs::write(&filepath, &key.key_data)?;
-                    println!("Saved key to: {}", filepath.display());
+                    let in_path = PathBuf::from(&args[1]);
+                    let encrypted_epub_key = extract_epub_key(in_path)?;
+                    println!("Encrypted EPUB key: {}", encrypted_epub_key);
                 }
 
                 Ok(())

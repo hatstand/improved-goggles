@@ -1,6 +1,9 @@
 #![cfg(windows)]
 
-use std::arch::{asm, x86_64::__cpuid};
+use std::arch::x86_64::__cpuid;
+use std::fs::File;
+use std::io::{BufReader, Read};
+use std::path::Path;
 
 use aes::Aes128;
 use anyhow::{anyhow, bail, Context, Result};
@@ -10,12 +13,12 @@ use cbc::{
     cipher::{BlockDecryptMut, KeyIvInit},
     Decryptor,
 };
-use rsa::pkcs8::der::Decode;
+use rsa::{pkcs1::DecodeRsaPrivateKey, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows_registry::CURRENT_USER;
-use windows_strings::HSTRING;
+use zip::ZipArchive;
 
 mod safe_strings;
 
@@ -26,7 +29,7 @@ const ADEPT_PATH: &str = r"Software\Adobe\Adept\Activation";
 
 #[derive(Debug)]
 pub struct AdeptKey {
-    pub key_data: Vec<u8>,
+    pub key: RsaPrivateKey,
     pub name: String,
 }
 
@@ -120,6 +123,37 @@ fn device_entropy() -> Result<[u8; 32]> {
     Ok(buf)
 }
 
+/// Extracts the encrypted key from an EPUB file.
+/// The key is located in META-INF/rights.xml inside the `encryptedKey` XML tag.
+pub fn extract_epub_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
+    // Open the EPUB file (which is a ZIP archive)
+    let file = File::open(epub_path.as_ref())
+        .with_context(|| format!("Failed to open EPUB file: {:?}", epub_path.as_ref()))?;
+    let reader = BufReader::new(file);
+    let mut archive = ZipArchive::new(reader).context("Failed to read EPUB as ZIP archive")?;
+
+    // Extract META-INF/rights.xml
+    let mut rights_file = archive
+        .by_name("META-INF/rights.xml")
+        .context("META-INF/rights.xml not found in EPUB")?;
+
+    // Read the XML content
+    let mut xml_content = String::new();
+    rights_file
+        .read_to_string(&mut xml_content)
+        .context("Failed to read rights.xml")?;
+
+    // Parse XML and find the encryptedKey tag
+    let doc = roxmltree::Document::parse(&xml_content).context("Failed to parse rights.xml")?;
+
+    // Find the encryptedKey element and return its text content
+    doc.descendants()
+        .find(|n| n.has_tag_name("encryptedKey"))
+        .and_then(|n| n.text())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("encryptedKey tag not found in rights.xml"))
+}
+
 fn keykey() -> Result<Vec<u8>> {
     println!("{:x}", cpu_signature());
     let keykey_key: windows_registry::Value = CURRENT_USER.open(KEYKEY_PATH)?.get_value("key")?;
@@ -163,7 +197,7 @@ fn keykey() -> Result<Vec<u8>> {
 }
 
 /// Main function to retrieve Adobe Adept keys from Windows registry
-pub fn adeptkeys() -> Result<Vec<AdeptKey>> {
+pub fn adeptkeys() -> Result<AdeptKey> {
     // Open main Adobe Adept registry key
     let adept_key = CURRENT_USER
         .open(ADEPT_PATH)
@@ -208,70 +242,20 @@ pub fn adeptkeys() -> Result<Vec<AdeptKey>> {
                     println!("    privateLicenseKey  value: {}", value);
 
                     let decoded = decrypt_private_key(&value, &aes_key_bytes)?;
-
-                    // Store the AES key for decryption
-                    if ktype2 == "key" {
-                        aes_key = Some(value.as_bytes().to_vec());
-                    }
+                    return Ok(AdeptKey {
+                        key: decoded,
+                        name: ("placeholder").to_string(),
+                    });
                 }
             }
         }
-
-        // Now process the privateLicenseKey if we have both key and license
-        // if let (Some((plk_value, _)), Some(key_bytes)) =
-        //     (credential_info.get("privateLicenseKey"), &aes_key)
-        // {
-        //     // Build the key name
-        //     let mut key_name = String::new();
-
-        //     // Add UUID (first 16 chars from key value, skip "adobekey_" prefix if present)
-        //     if let Some((key_val, _)) = credential_info.get("key") {
-        //         if key_val.len() >= 9 {
-        //             key_name.push_str(&key_val[9..]);
-        //             key_name.push('_');
-        //         }
-        //     }
-
-        //     // Add username method and value if present
-        //     if let Some((username_val, username_method)) = credential_info.get("username") {
-        //         if !username_method.is_empty() {
-        //             key_name.push_str(username_method);
-        //             key_name.push('_');
-        //         }
-        //         key_name.push_str(username_val);
-        //         key_name.push('_');
-        //     }
-
-        // Remove trailing underscore
-        // if key_name.ends_with('_') {
-        //     key_name.pop();
-        // }
-
-        // if key_name.is_empty() {
-        //     key_name = "Unknown".to_string();
-        // }
-
-        // // Decrypt the private license key
-        // match decrypt_private_key(plk_value, key_bytes) {
-        //     Ok(decrypted) => {
-        //         keys.push(AdeptKey {
-        //             key_data: decrypted,
-        //             name: key_name,
-        //         });
-        //     }
-        //     Err(e) => {
-        //         eprintln!("Failed to decrypt key for {}: {}", key_name, e);
-        //     }
-        // }
-        // }
     }
-
-    bail!("Not implemented");
+    bail!("No credentials found in registry");
 }
 
 /// Decrypt the private license key using AES-CBC
-/// Returns key in DER format.
-fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<Vec<u8>> {
+/// Returns the parsed RSA private key.
+fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey> {
     // Decode base64
     let encrypted = base64::prelude::BASE64_STANDARD
         .decode(encrypted_b64)
@@ -307,14 +291,10 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<Vec<u8>> {
         bail!("Decrypted data too short");
     }
 
-    let rsaKey = rsa::pkcs1::RsaPrivateKey::from_der(&unpadded[26..])
-        .map_err(|e| anyhow!("Failed to parse RSA private key: {:?}", e))?;
-    println!(
-        "Successfully parsed RSA private key from decrypted data: {:?}",
-        rsaKey.public_exponent,
-    );
-
-    Ok(unpadded[26..].to_vec())
+    // Parse the DER-encoded RSA private key (this creates an owned RsaPrivateKey)
+    let der_bytes = &unpadded[26..];
+    RsaPrivateKey::from_pkcs1_der(der_bytes)
+        .context("Failed to parse RSA private key from decrypted data")
 }
 
 #[cfg(test)]
