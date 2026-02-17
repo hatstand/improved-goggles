@@ -23,6 +23,7 @@ quick-xml = "0.37"
 reqwest = { version = "0.12", features = ["blocking"] }
 roxmltree = "0.21.1"
 rsa = "0.9.10"
+sha1 = "0.10"
 zip = "8.1.0"
 
 [target.'cfg(windows)'.dependencies]
