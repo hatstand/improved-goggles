@@ -10,6 +10,7 @@ use cbc::{
     cipher::{BlockDecryptMut, KeyIvInit},
     Decryptor,
 };
+use rsa::pkcs8::der::Decode;
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
@@ -140,7 +141,10 @@ fn keykey() -> Result<Vec<u8>> {
                 pbData: keykey_key.as_ptr() as *mut u8,
             } as *const CRYPT_INTEGER_BLOB,
             None,
-            Some(entropy.as_ptr() as *const _),
+            Some(&CRYPT_INTEGER_BLOB {
+                cbData: entropy.len() as u32,
+                pbData: entropy.as_ptr() as *mut u8,
+            }),
             None,
             None,
             0,
@@ -266,6 +270,7 @@ pub fn adeptkeys() -> Result<Vec<AdeptKey>> {
 }
 
 /// Decrypt the private license key using AES-CBC
+/// Returns key in DER format.
 fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<Vec<u8>> {
     // Decode base64
     let encrypted = base64::prelude::BASE64_STANDARD
@@ -301,6 +306,13 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<Vec<u8>> {
     if unpadded.len() < 26 {
         bail!("Decrypted data too short");
     }
+
+    let rsaKey = rsa::pkcs1::RsaPrivateKey::from_der(&unpadded[26..])
+        .map_err(|e| anyhow!("Failed to parse RSA private key: {:?}", e))?;
+    println!(
+        "Successfully parsed RSA private key from decrypted data: {:?}",
+        rsaKey.public_exponent,
+    );
 
     Ok(unpadded[26..].to_vec())
 }
