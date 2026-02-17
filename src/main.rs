@@ -216,7 +216,11 @@ fn main() -> Result<()> {
 
             Ok(())
         }
-        Commands::FetchEpub { acsm, output, key } => {
+        Commands::FetchEpub {
+            acsm,
+            output,
+            key: _key,
+        } => {
             println!("Fetching EPUB from ACSM file...");
             println!("  ACSM: {}", acsm.display());
             println!("  Output: {}", output.display());
