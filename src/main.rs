@@ -714,7 +714,7 @@ fn main() -> Result<()> {
                         {
                             println!("  Extracting device key from registry...");
                             let key = adeptkeys()?;
-                            key.private_license_key
+                            key.private_auth_key
                         }
                     }
                 };
