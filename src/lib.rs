@@ -23,7 +23,7 @@ mod acsm;
 // Re-export public API
 pub use acsm::{parse_acsm, AcsmInfo};
 #[cfg(windows)]
-pub use adept_keys::{adept_user, adeptkeys, AdeptKey};
+pub use adept_keys::{adept_device, adept_user, adeptkeys, AdeptKey};
 
 // Non-Windows stub
 #[cfg(not(windows))]
@@ -41,6 +41,11 @@ pub fn adeptkeys() -> Result<AdeptKey> {
 #[cfg(not(windows))]
 pub fn adept_user() -> Result<String> {
     bail!("adept_user() is only available on Windows. This function requires access to the Windows Registry.")
+}
+
+#[cfg(not(windows))]
+pub fn adept_device() -> Result<String> {
+    bail!("adept_device() is only available on Windows. This function requires access to the Windows Registry.")
 }
 
 type Aes128CbcDec = Decryptor<Aes128>;

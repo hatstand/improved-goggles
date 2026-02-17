@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[cfg(windows)]
-use rmpub::{adept_user, adeptkeys};
+use rmpub::{adept_device, adept_user, adeptkeys};
 #[cfg(windows)]
 use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
 
@@ -81,6 +81,8 @@ enum Commands {
 enum DebugCommands {
     /// Extract the Adept user GUID from Windows Registry
     ExtractUser,
+    /// Extract the Adept device identifier from Windows Registry
+    ExtractDevice,
 }
 
 fn main() -> Result<()> {
@@ -260,6 +262,24 @@ fn main() -> Result<()> {
 
                     println!("✓ Successfully extracted Adept user");
                     println!("  User GUID: {}", user);
+                    Ok(())
+                }
+            }
+            DebugCommands::ExtractDevice => {
+                #[cfg(not(windows))]
+                {
+                    use anyhow::bail;
+                    bail!("Device extraction from registry is not supported on this platform. This command is only available on Windows.");
+                }
+
+                #[cfg(windows)]
+                {
+                    println!("Extracting Adept device from Windows Registry...");
+
+                    let device = adept_device()?;
+
+                    println!("✓ Successfully extracted Adept device");
+                    println!("  Device identifier: {}", device);
                     Ok(())
                 }
             }
