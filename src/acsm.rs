@@ -4,6 +4,7 @@ use std::str::FromStr;
 use anyhow::{anyhow, Context, Result};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
+use rsa::{Pkcs1v15Sign, RsaPrivateKey};
 use sha1::{Digest, Sha1};
 
 /// Metadata extracted from ACSM file (Dublin Core elements)
@@ -461,19 +462,13 @@ fn hash_xml_document(xml: &str) -> Result<Vec<u8>> {
 ///
 /// # Arguments
 /// * `xml` - The fulfill request XML (without signature element)
-/// * `device_key_der` - Device private key in DER format
+/// * `private_key` - RSA private key
 ///
 /// # Returns
 /// Base64-encoded RSA signature
-pub fn sign_fulfill_request(xml: &str, device_key_der: &[u8]) -> Result<String> {
-    use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Sign, RsaPrivateKey};
-
+pub fn sign_fulfill_request(xml: &str, private_key: &RsaPrivateKey) -> Result<String> {
     // Hash the XML using Adobe's algorithm
     let hash = hash_xml_document(xml)?;
-
-    // Load the RSA private key
-    let private_key =
-        RsaPrivateKey::from_pkcs1_der(device_key_der).context("Failed to parse device key")?;
 
     // Sign the hash using textbook RSA (PKCS#1 v1.5)
     let signature = private_key
@@ -490,6 +485,7 @@ pub fn sign_fulfill_request(xml: &str, device_key_der: &[u8]) -> Result<String> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rsa::pkcs1::DecodeRsaPrivateKey;
 
     #[test]
     fn test_parse_acsm() {
@@ -627,10 +623,13 @@ mod tests {
         let xml = generate_fulfill_request(&acsm_info, user, device, fingerprint);
 
         // Load device key
-        let device_key = std::fs::read("device_key.der").expect("Failed to read device_key.der");
+        let device_key_bytes =
+            std::fs::read("device_key.der").expect("Failed to read device_key.der");
+        let private_key =
+            RsaPrivateKey::from_pkcs1_der(&device_key_bytes).expect("Failed to parse device key");
 
         // Sign the request
-        let signature = sign_fulfill_request(&xml, &device_key);
+        let signature = sign_fulfill_request(&xml, &private_key);
 
         assert!(signature.is_ok(), "Failed to sign: {:?}", signature.err());
 
