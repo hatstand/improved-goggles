@@ -216,9 +216,7 @@ pub fn decrypt_epub_file<P: AsRef<Path>>(
     }
 
     let iv = &encrypted_data[..16];
-    // let iv = [0u8; 16]; // Adobe ADEPT uses a fixed IV of 16 zero bytes
-    // let ciphertext = &encrypted_data[16..];
-    let ciphertext = &encrypted_data[16..]; // The Python code seems to use the entire file as ciphertext, including the IV
+    let ciphertext = &encrypted_data[16..];
 
     // Ensure key is 16 bytes (AES-128)
     if decrypted_key.len() != 16 {
