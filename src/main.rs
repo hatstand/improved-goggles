@@ -3,10 +3,10 @@ use clap::{Parser, Subcommand};
 use jiff::Timestamp;
 use log::debug;
 use rmpub::{
-    decrypt_content_key, decrypt_epub, decrypt_epub_file,
-    decrypt_private_key_with_iv, extract_content_key, generate_fulfill_request,
-    generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response,
-    parse_signin_response, parse_signin_xml, sign_fulfill_request, verify_fulfill_request,
+    decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key_with_iv,
+    extract_content_key, generate_fulfill_request, generate_fulfill_request_minified, parse_acsm,
+    parse_fulfillment_response, parse_signin_response, parse_signin_xml, sign_fulfill_request,
+    verify_fulfill_request,
 };
 use std::fs;
 use std::path::PathBuf;

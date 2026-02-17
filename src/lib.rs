@@ -30,8 +30,7 @@ pub use acsm::{
 pub use activation::{parse_signin_response, parse_signin_xml, SignInData, SignInResponse};
 #[cfg(windows)]
 pub use adept_keys::{
-    adept_device, adept_fingerprint, adept_user, adeptkeys, decrypt_private_key,
-    decrypt_private_key_with_iv, AdeptKey,
+    adept_device, adept_fingerprint, adept_user, adeptkeys, decrypt_private_key_with_iv, AdeptKey,
 };
 
 // Non-Windows stub

@@ -261,7 +261,7 @@ fn private_license_key_from_registry_key(
         if ktype == "privateLicenseKey" {
             // Value is an AES-CBC encrypted RSA private key, base64-encoded. Decrypt it with the device key and a zero IV.
             let value = sub_subkey.get_string("value")?;
-            return decrypt_private_key_from_b64(&value, device_key);
+            return decrypt_private_license_key(&value, device_key);
         }
     }
     bail!("No privateLicenseKey found in registry");
@@ -482,19 +482,14 @@ pub fn decrypt_private_key_with_iv(
         .context("Failed to parse RSA private key from decrypted data")
 }
 
-pub fn decrypt_private_key(encrypted: &[u8], key: &[u8]) -> Result<RsaPrivateKey> {
-    // Use 16 bytes zero IV as per the Python code
-    let iv = [0u8; 16];
-    decrypt_private_key_with_iv(encrypted, key, &iv)
-}
-
 /// Decrypt the private license key using AES-CBC
 /// Returns the parsed RSA private key.
-pub fn decrypt_private_key_from_b64(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey> {
+pub fn decrypt_private_license_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey> {
     // Decode base64
     let encrypted = base64::prelude::BASE64_STANDARD
         .decode(encrypted_b64)
         .context("Failed to decode base64")?;
+    let iv = [0u8; 16];
 
-    decrypt_private_key(&encrypted, key)
+    decrypt_private_key_with_iv(&encrypted, key, &iv)
 }

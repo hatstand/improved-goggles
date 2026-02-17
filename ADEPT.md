@@ -271,3 +271,6 @@ Lists which files in the EPUB are encrypted and how:
 ## References
 
 * [DeDRM_Tools](https://github.com/noDRM/DeDRM_tools/blob/7379b453199ed1ba91bf3a4ce4875d5ed3c309a9/DeDRM_plugin/adobekey.py)
+* [acsm-calibre-plugin](https://github.com/Leseratte10/acsm-calibre-plugin)
+* [knock](https://web.archive.org/web/20221007143859/https://github.com/BentonEdmondson/knock/blob/main/src/knock.cpp)
+* [libgourou](https://github.com/SamuelMarks/libgourou)
