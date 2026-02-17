@@ -137,7 +137,7 @@ fn keykey() -> Result<Vec<u8>> {
             cbData: 0,
             pbData: std::ptr::null_mut(),
         };
-        debug!("Decrypting key with entropy: {}", hex::encode(&entropy));
+        debug!("Decrypting key with entropy: {}", hex::encode(entropy));
         debug!(
             "Encrypted key (len={}): {}",
             keykey_key.len(),

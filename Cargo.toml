@@ -3,6 +3,10 @@ name = "rmpub"
 version = "0.1.0"
 edition = "2021"
 
+[lints.clippy]
+# Allow cfg(windows) on inside module and on import.
+duplicated_attributes = "allow"
+
 [dependencies]
 aes = "0.8"
 anyhow = "1.0.101"
