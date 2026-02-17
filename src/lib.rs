@@ -101,7 +101,7 @@ pub fn extract_content_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
 ///
 /// # Arguments
 /// * `encrypted_key_b64` - The Base64-encoded encrypted key from the EPUB
-/// * `rsa_key` - The RSA private key to use for decryption
+/// * `rsa_key` - The RSA private key to use for decryption. Likely the `private_license_key` from `AdeptKey`.
 ///
 /// # Returns
 /// The decrypted key as raw bytes

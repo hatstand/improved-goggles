@@ -4,9 +4,9 @@ use jiff::Timestamp;
 use log::debug;
 use rmpub::{
     decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key_with_iv,
-    extract_content_key, generate_fulfill_request_minified, parse_acsm,
-    parse_fulfillment_response, parse_signin_response, parse_signin_xml, sign_fulfill_request,
-    verify_fulfill_request,
+    extract_content_key, generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response,
+    parse_signin_response, parse_signin_xml, sign_fulfill_request, verify_fulfill_request,
+    AdeptKey,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ use rsa::pkcs1::DecodeRsaPrivateKey;
 #[cfg(windows)]
 use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys};
 #[cfg(windows)]
-use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
+use rsa::traits::PublicKeyParts;
 
 #[derive(Parser)]
 #[command(name = "rmpub")]
@@ -142,17 +142,37 @@ fn extract_key(output: PathBuf) -> Result<()> {
 
         let key = adeptkeys()?;
 
-        // Export the RSA private key to DER format
-        let der_bytes = key.private_license_key.to_pkcs1_der()?;
-        fs::write(&output, der_bytes.as_bytes())?;
+        let j = serde_json::to_string_pretty(&key).context("Failed to serialize key to JSON")?;
+        fs::write(&output, j).context("Failed to write key to output file")?;
 
         println!(
             "✓ Successfully extracted device key to: {}",
             output.display()
         );
-        println!("  Key name: {}", key.name);
-        println!("  Key size: {} bits", key.private_license_key.size() * 8);
         Ok(())
+    }
+}
+
+fn load_keys(key_path: Option<PathBuf>) -> Result<AdeptKey> {
+    if let Some(key_path) = key_path {
+        debug!("Using keys from: {}", key_path.display());
+        let keys_bytes = fs::read(key_path)?;
+        let keys: AdeptKey = serde_json::from_slice(&keys_bytes)?;
+        Ok(keys)
+    } else {
+        #[cfg(windows)]
+        {
+            println!("  Extracting key from registry...");
+            let k = adeptkeys()?;
+            Ok(k)
+        }
+
+        #[cfg(not(windows))]
+        {
+            eprintln!("Error: Key extraction from registry is only available on Windows.");
+            eprintln!("Please use --key parameter with a pre-extracted key file.");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -181,28 +201,7 @@ fn decrypt_file(
     println!("  Output: {}", output_path.display());
 
     // Get the RSA private key
-    let rsa_key = if let Some(key_path) = key {
-        use rsa::pkcs1::DecodeRsaPrivateKey;
-
-        debug!("Using key from: {}", key_path.display());
-        let der_bytes = fs::read(key_path)?;
-        rsa::RsaPrivateKey::from_pkcs1_der(&der_bytes)?
-    } else {
-        #[cfg(windows)]
-        {
-            println!("  Extracting key from registry...");
-            let key = adeptkeys()?;
-            println!("  Using key: {}", key.name);
-            key.private_license_key.clone()
-        }
-
-        #[cfg(not(windows))]
-        {
-            eprintln!("Error: Key extraction from registry is only available on Windows.");
-            eprintln!("Please use --key parameter with a pre-extracted key file.");
-            std::process::exit(1);
-        }
-    };
+    let keys: AdeptKey = load_keys(key)?;
 
     // Extract the encrypted content key from the EPUB
     println!("  Extracting content key from EPUB...");
@@ -210,7 +209,7 @@ fn decrypt_file(
 
     // Decrypt the content key using RSA
     println!("  Decrypting content key...");
-    let content_key = decrypt_content_key(&encrypted_content_key, &rsa_key)?;
+    let content_key = decrypt_content_key(&encrypted_content_key, &keys.private_license_key)?;
     debug!("Content key: {}", hex::encode(&content_key));
 
     // Decrypt the specific file
@@ -234,33 +233,11 @@ fn decrypt_book(input: PathBuf, output: PathBuf, key: Option<PathBuf>) -> Result
     println!("  Input: {}", input.display());
     println!("  Output: {}", output.display());
 
-    // Get the RSA private key
-    let rsa_key = if let Some(key_path) = key {
-        use rsa::pkcs1::DecodeRsaPrivateKey;
-
-        debug!("Using key from: {}", key_path.display());
-        let der_bytes = fs::read(key_path)?;
-        rsa::RsaPrivateKey::from_pkcs1_der(&der_bytes)?
-    } else {
-        #[cfg(windows)]
-        {
-            println!("  Extracting key from registry...");
-            let key = adeptkeys()?;
-            println!("  Using key: {}", key.name);
-            key.private_license_key.clone()
-        }
-
-        #[cfg(not(windows))]
-        {
-            eprintln!("Error: Key extraction from registry is only available on Windows.");
-            eprintln!("Please use --key parameter with a pre-extracted key file.");
-            std::process::exit(1);
-        }
-    };
+    let keys = load_keys(key)?;
 
     // Decrypt the entire EPUB
     println!("  Decrypting files...");
-    let decrypted_count = decrypt_epub(&input, &output, &rsa_key)?;
+    let decrypted_count = decrypt_epub(&input, &output, &keys.private_license_key)?;
 
     println!("✓ Successfully decrypted EPUB");
     println!("  Decrypted {} files", decrypted_count);
