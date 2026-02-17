@@ -1,55 +1,135 @@
 #[cfg(windows)]
-use rmpub::adeptkeys;
+use clap::{Parser, Subcommand};
+#[cfg(windows)]
+use rmpub::{adeptkeys, decrypt_content_key, decrypt_epub_file, extract_content_key};
+#[cfg(windows)]
+use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
 #[cfg(windows)]
 use std::fs;
 #[cfg(windows)]
 use std::path::PathBuf;
 
+#[cfg(windows)]
+#[derive(Parser)]
+#[command(name = "rmpub")]
+#[command(about = "Adobe ADEPT DRM key extraction and EPUB decryption tool", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[cfg(windows)]
+#[derive(Subcommand)]
+enum Commands {
+    /// Extract device RSA private key from Windows Registry
+    ExtractKey {
+        /// Output file path for the private key (DER format)
+        #[arg(short, long, default_value = "adept_key.der")]
+        output: PathBuf,
+    },
+    /// Decrypt a file from a DRM-protected EPUB
+    DecryptFile {
+        /// Path to the EPUB file
+        epub: PathBuf,
+
+        /// Path to the file within the EPUB to decrypt (e.g., "OEBPS/Text/chapter1.xhtml")
+        file: String,
+
+        /// Output file path for the decrypted content. If not specified, saves to current directory with same filename.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
+    },
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
-        println!("Adobe Adept Key Retrieval v0.1.0");
-        println!("Rust implementation based on DeDRM_tools\n");
+        let cli = Cli::parse();
 
-        let args = std::env::args().collect::<Vec<String>>();
+        match cli.command {
+            Commands::ExtractKey { output } => {
+                println!("Extracting device key from Windows Registry...");
 
-        match adeptkeys() {
-            Ok(key) => {
-                println!("Successfully retrieved key");
+                let key = adeptkeys()?;
 
-                if args.len() > 1 {
-                    use rmpub::extract_content_key;
+                // Export the RSA private key to DER format
+                let der_bytes = key.key.to_pkcs1_der()?;
+                fs::write(&output, der_bytes.as_bytes())?;
 
-                    let in_path = PathBuf::from(&args[1]);
-                    let item_path = &args[2];
-                    let encrypted_epub_key = extract_content_key(&in_path)?;
-                    println!("Encrypted EPUB key: {}", encrypted_epub_key);
-                    let decrypted_epub_key =
-                        rmpub::decrypt_content_key(&encrypted_epub_key, &key.key)?;
-                    println!("Decrypted EPUB key: {}", hex::encode(&decrypted_epub_key));
-
-                    let cover_image =
-                        rmpub::decrypt_epub_file(&in_path, &item_path, &decrypted_epub_key)?;
-
-                    if cover_image[0] != 0xff || cover_image[1] != 0xd8 {
-                        eprintln!(
-                            "Warning: Decrypted cover image does not start with JPEG magic bytes"
-                        );
-                    }
-
-                    // Write the decrypted image to a file
-                    fs::write("cover_image.jpg", &cover_image)?;
-                    println!(
-                        "Wrote decrypted cover image to cover_image.jpg ({} bytes)",
-                        cover_image.len()
-                    );
-                }
+                println!(
+                    "✓ Successfully extracted device key to: {}",
+                    output.display()
+                );
+                println!("  Key name: {}", key.name);
+                println!("  Key size: {} bits", key.key.size() * 8);
 
                 Ok(())
             }
-            Err(e) => {
-                eprintln!("Error retrieving Adobe Adept keys: {}", e);
-                Err(e.into())
+            Commands::DecryptFile {
+                epub,
+                file,
+                output,
+                key,
+            } => {
+                // Determine output path: use provided or extract filename from file path
+                let output_path = if let Some(out) = output {
+                    out
+                } else {
+                    // Extract just the filename from the file path
+                    let filename = std::path::Path::new(&file)
+                        .file_name()
+                        .ok_or("Invalid file path")?
+                        .to_string_lossy()
+                        .to_string();
+                    PathBuf::from(filename)
+                };
+
+                println!("Decrypting file from EPUB...");
+                println!("  EPUB: {}", epub.display());
+                println!("  File: {}", file);
+                println!("  Output: {}", output_path.display());
+
+                // Get the RSA private key
+                let rsa_key = if let Some(key_path) = key {
+                    use rsa::pkcs1::DecodeRsaPrivateKey;
+
+                    println!("  Using key from: {}", key_path.display());
+                    let der_bytes = fs::read(key_path)?;
+                    rsa::RsaPrivateKey::from_pkcs1_der(&der_bytes)?
+                } else {
+                    println!("  Extracting key from registry...");
+                    let key = adeptkeys()?;
+                    println!("  Using key: {}", key.name);
+                    key.key
+                };
+
+                // Extract the encrypted content key from the EPUB
+                println!("  Extracting content key from EPUB...");
+                let encrypted_content_key = extract_content_key(&epub)?;
+
+                // Decrypt the content key using RSA
+                println!("  Decrypting content key...");
+                let content_key = decrypt_content_key(&encrypted_content_key, &rsa_key)?;
+                println!("  Content key: {}", hex::encode(&content_key));
+
+                // Decrypt the specific file
+                println!("  Decrypting file content...");
+                let decrypted_content = decrypt_epub_file(&epub, &file, &content_key)?;
+
+                // Write to output
+                fs::write(&output_path, &decrypted_content)?;
+
+                println!(
+                    "✓ Successfully decrypted file ({} bytes)",
+                    decrypted_content.len()
+                );
+                println!("  Saved to: {}", output_path.display());
+
+                Ok(())
             }
         }
     }
