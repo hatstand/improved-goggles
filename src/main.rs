@@ -178,7 +178,7 @@ fn main() -> Result<()> {
                 let key = adeptkeys()?;
 
                 // Export the RSA private key to DER format
-                let der_bytes = key.key.to_pkcs1_der()?;
+                let der_bytes = key.private_license_key.to_pkcs1_der()?;
                 fs::write(&output, der_bytes.as_bytes())?;
 
                 println!(
@@ -186,7 +186,7 @@ fn main() -> Result<()> {
                     output.display()
                 );
                 println!("  Key name: {}", key.name);
-                println!("  Key size: {} bits", key.key.size() * 8);
+                println!("  Key size: {} bits", key.private_license_key.size() * 8);
                 Ok(())
             }
         }
@@ -227,7 +227,7 @@ fn main() -> Result<()> {
                     println!("  Extracting key from registry...");
                     let key = adeptkeys()?;
                     println!("  Using key: {}", key.name);
-                    key.key
+                    key.private_license_key
                 }
 
                 #[cfg(not(windows))]
@@ -280,7 +280,7 @@ fn main() -> Result<()> {
                     println!("  Extracting key from registry...");
                     let key = adeptkeys()?;
                     println!("  Using key: {}", key.name);
-                    key.key
+                    key.private_license_key
                 }
 
                 #[cfg(not(windows))]
@@ -347,7 +347,7 @@ fn main() -> Result<()> {
 
                 // Sign the request
                 println!("  Signing fulfillment request...");
-                let signature = sign_fulfill_request(&fulfill_xml, &key.key)?;
+                let signature = sign_fulfill_request(&fulfill_xml, &key.private_license_key)?;
                 println!("  ✓ Signed fulfill request");
 
                 // Add signature to complete the XML
@@ -672,7 +672,7 @@ fn main() -> Result<()> {
                             {
                                 println!("  Extracting device key from registry...");
                                 let key = adeptkeys()?;
-                                key.key
+                                key.private_license_key
                             }
                         }
                     };
@@ -714,7 +714,7 @@ fn main() -> Result<()> {
                         {
                             println!("  Extracting device key from registry...");
                             let key = adeptkeys()?;
-                            key.key
+                            key.private_license_key
                         }
                     }
                 };

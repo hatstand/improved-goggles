@@ -12,13 +12,14 @@ use std::arch::x86_64::__cpuid;
 
 use aes::Aes128;
 use anyhow::{anyhow, bail, Context, Result};
-use base64::Engine;
+use base64::{prelude::BASE64_STANDARD, Engine};
 use byteorder::{BigEndian, ByteOrder};
 use cbc::{
     cipher::{BlockDecryptMut, KeyIvInit},
     Decryptor,
 };
 use log::debug;
+use p12_keystore::KeyStoreEntry;
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
@@ -35,7 +36,8 @@ const ADEPT_PATH: &str = r"Software\Adobe\Adept\Activation";
 #[derive(Debug)]
 pub struct AdeptKey {
     pub device_key: Vec<u8>,
-    pub key: RsaPrivateKey,
+    pub private_license_key: RsaPrivateKey,
+    pub private_auth_key: RsaPrivateKey,
     pub name: String,
 }
 
@@ -192,51 +194,77 @@ pub fn adeptkeys() -> Result<AdeptKey> {
     );
 
     for subkey_name in subkey_names {
-        debug!("Processing subkey: {}", subkey_name);
         // Open each subkey
         let subkey = adept_key.open(&subkey_name)?;
 
         // Get the default value (type)
         let ktype = subkey.get_string("")?;
 
-        debug!("Subkey: {}  Type: {}", subkey_name, ktype);
-
         // We're only interested in 'credentials' keys
         if ktype == "credentials" {
-            // Enumerate sub-subkeys
-            let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+            let private_license_key =
+                private_license_key_from_registry_key(&subkey, &aes_key_bytes)?;
+            let (_, pkcs) = pkcs12_from_registry_key(&subkey, &aes_key_bytes)?;
 
-            for sub_subkey_name in sub_subkeys {
-                let sub_subkey = subkey.open(&sub_subkey_name)?;
-                let ktype2 = sub_subkey.get_string("")?;
+            return Ok(AdeptKey {
+                private_license_key,
+                name: ("placeholder").to_string(),
+                device_key: aes_key_bytes.clone(),
+                private_auth_key: pkcs,
+            });
+        }
+    }
+    bail!("No credentials found in registry");
+}
 
-                debug!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
+fn pkcs12_from_registry_key(
+    subkey: &windows_registry::Key,
+    device_key: &[u8],
+) -> Result<(String, RsaPrivateKey)> {
+    let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+    for sub_subkey_name in sub_subkeys {
+        let sub_subkey = subkey.open(&sub_subkey_name)?;
+        let ktype2 = sub_subkey.get_string("")?;
 
-                // Collect information for each credential component
-                if ktype2 == "privateLicenseKey" {
-                    let value = sub_subkey.get_string("value")?;
-
-                    debug!("    privateLicenseKey value: {}", value);
-
-                    let decoded = decrypt_private_key_from_b64(&value, &aes_key_bytes)?;
-                    return Ok(AdeptKey {
-                        key: decoded,
-                        name: ("placeholder").to_string(),
-                        device_key: aes_key_bytes.clone(),
-                    });
-                } else if ktype2 == "pkcs12" {
-                    let value = sub_subkey.get_string("value")?;
-                    debug!("    pkcs12 value: {}", value);
-                    // let key = RsaPrivateKey::from_pkcs8_der(
-                    //     &base64::prelude::BASE64_STANDARD.decode(value)?,
-                    // )
-                    // .context("Failed to parse RSA private key from pkcs12 value")?;
-                    // println!("pkcs12: {:?}", key);
+        // Collect information for each credential component
+        if ktype2 == "pkcs12" {
+            // Value is a pkcs12 with the base64-encoded device key as the password.
+            let value = sub_subkey.get_string("value")?;
+            let data = base64::prelude::BASE64_STANDARD.decode(value)?;
+            let password = base64::prelude::BASE64_STANDARD.encode(device_key);
+            let keystore = p12_keystore::KeyStore::from_pkcs12(&data, &password)?;
+            for (name, entry) in keystore.entries() {
+                println!("name: {} entry: {:?}", name, entry);
+                match entry {
+                    KeyStoreEntry::PrivateKeyChain(keychain) => {
+                        let rsa_key = RsaPrivateKey::from_pkcs8_der(keychain.key())?;
+                        return Ok((name.clone(), rsa_key));
+                    }
+                    _ => continue,
                 }
             }
         }
     }
-    bail!("No credentials found in registry");
+    bail!("No pkcs12 found in registry");
+}
+
+fn private_license_key_from_registry_key(
+    subkey: &windows_registry::Key,
+    device_key: &[u8],
+) -> Result<RsaPrivateKey> {
+    let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+    for sub_subkey_name in sub_subkeys {
+        let sub_subkey = subkey.open(&sub_subkey_name)?;
+        let ktype = sub_subkey.get_string("")?;
+
+        // Collect information for each credential component
+        if ktype == "privateLicenseKey" {
+            // Value is an AES-CBC encrypted RSA private key, base64-encoded. Decrypt it with the device key and a zero IV.
+            let value = sub_subkey.get_string("value")?;
+            return decrypt_private_key_from_b64(&value, &device_key);
+        }
+    }
+    bail!("No privateLicenseKey found in registry");
 }
 
 /// Extract the Adept user GUID from Windows registry
