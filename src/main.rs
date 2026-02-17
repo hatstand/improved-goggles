@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use base64::prelude::BASE64_STANDARD;
 use clap::{Parser, Subcommand};
+use jiff::Timestamp;
 use log::debug;
 use rmpub::{
     decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key,
@@ -78,6 +79,10 @@ enum Commands {
         /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
         #[arg(short, long)]
         key: Option<PathBuf>,
+
+        /// Dry run - show what would be done without making requests or writing files
+        #[arg(short = 'n', long)]
+        dry_run: bool,
     },
     /// Debug commands for development and troubleshooting
     Debug {
@@ -141,10 +146,6 @@ enum DebugCommands {
     ParseSignIn {
         /// Path to the signIn XML file
         xml: PathBuf,
-
-        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
-        #[arg(short, long)]
-        key_path: Option<PathBuf>,
 
         /// Path to Adobe activation server's private key (for decrypting signInData, rarely available)
         #[arg(short, long)]
@@ -305,8 +306,13 @@ fn main() -> Result<()> {
             acsm,
             output,
             key: _key,
+            dry_run,
         } => {
-            println!("Fetching EPUB from ACSM file...");
+            if dry_run {
+                println!("[DRY RUN] Fetching EPUB from ACSM file...");
+            } else {
+                println!("Fetching EPUB from ACSM file...");
+            }
             println!("  ACSM: {}", acsm.display());
             println!("  Output: {}", output.display());
 
@@ -347,7 +353,7 @@ fn main() -> Result<()> {
 
                 // Sign the request
                 println!("  Signing fulfillment request...");
-                let signature = sign_fulfill_request(&fulfill_xml, &key.private_license_key)?;
+                let signature = sign_fulfill_request(&fulfill_xml, &key.private_auth_key)?;
                 println!("  ✓ Signed fulfill request");
 
                 // Add signature to complete the XML
@@ -358,16 +364,17 @@ fn main() -> Result<()> {
                 );
 
                 // Print the fulfillment request
-                println!("\n--- Fulfillment Request (first 500 chars) ---");
-                println!(
-                    "{}{}",
-                    &complete_xml.chars().take(500).collect::<String>(),
-                    if complete_xml.len() > 500 { "..." } else { "" }
-                );
+                println!("\n--- Fulfillment Request ---");
+                println!("{}", complete_xml);
                 println!("--- End Fulfillment Request ---\n");
 
-                // Create debug trace file
-                let trace_file = output.with_extension("trace.txt");
+                // Create debug trace file with RFC3339 timestamp
+                let timestamp = Timestamp::now().to_string().replace(':', "-");
+                let trace_file = output.with_file_name(format!(
+                    "{}.{}.trace.txt",
+                    output.file_stem().unwrap().to_string_lossy(),
+                    timestamp
+                ));
                 let trace_content = std::cell::RefCell::new(String::new());
                 trace_content
                     .borrow_mut()
@@ -386,7 +393,15 @@ fn main() -> Result<()> {
                 // The fulfillment endpoint is operatorURL + "/Fulfill"
                 let fulfill_url =
                     format!("{}/Fulfill", acsm_info.operator_url.trim_end_matches('/'));
-                println!("  Sending fulfillment request to {}...", fulfill_url);
+
+                if dry_run {
+                    println!(
+                        "  [DRY RUN] Would send fulfillment request to {}...",
+                        fulfill_url
+                    );
+                } else {
+                    println!("  Sending fulfillment request to {}...", fulfill_url);
+                }
 
                 // Log request
                 trace_content.borrow_mut().push_str(&format!(
@@ -401,6 +416,19 @@ fn main() -> Result<()> {
                     complete_xml.len(),
                     complete_xml
                 ));
+
+                if dry_run {
+                    println!(
+                        "  [DRY RUN] Would POST {} bytes to {}",
+                        complete_xml.len(),
+                        fulfill_url
+                    );
+                    println!("  [DRY RUN] Skipping actual HTTP request");
+                    println!("\n✓ Dry run completed successfully");
+                    println!("  No files were written");
+                    println!("  No HTTP requests were made");
+                    return Ok(());
+                }
 
                 let client = reqwest::blocking::Client::builder()
                     .danger_accept_invalid_certs(true) // Accept invalid certificates
@@ -814,11 +842,7 @@ fn main() -> Result<()> {
 
                 Ok(())
             }
-            DebugCommands::ParseSignIn {
-                xml,
-                key_path,
-                server_key,
-            } => {
+            DebugCommands::ParseSignIn { xml, server_key } => {
                 println!("Parsing Adobe ADEPT signIn XML...");
                 println!("  XML file: {}", xml.display());
 
