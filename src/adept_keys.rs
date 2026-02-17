@@ -21,23 +21,24 @@ use cbc::{
 use log::debug;
 use p12_keystore::KeyStoreEntry;
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
+use serde::{Deserialize, Serialize};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows_registry::CURRENT_USER;
 
-use crate::safe_strings;
+use crate::{rsa::StorableRsaPrivateKey, safe_strings};
 
 type Aes128CbcDec = Decryptor<Aes128>;
 
 const DEVICE_KEY_PATH: &str = r"Software\Adobe\Adept\Device";
 const ADEPT_PATH: &str = r"Software\Adobe\Adept\Activation";
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AdeptKey {
     pub device_key: Vec<u8>,
-    pub private_license_key: RsaPrivateKey,
-    pub private_auth_key: RsaPrivateKey,
+    pub private_license_key: StorableRsaPrivateKey,
+    pub private_auth_key: StorableRsaPrivateKey,
     pub name: String,
 }
 
@@ -207,10 +208,10 @@ pub fn adeptkeys() -> Result<AdeptKey> {
             let (_, pkcs) = pkcs12_from_registry_key(&subkey, &aes_key_bytes)?;
 
             return Ok(AdeptKey {
-                private_license_key,
+                private_license_key: StorableRsaPrivateKey(private_license_key),
                 name: ("placeholder").to_string(),
                 device_key: aes_key_bytes.clone(),
-                private_auth_key: pkcs,
+                private_auth_key: StorableRsaPrivateKey(pkcs),
             });
         }
     }

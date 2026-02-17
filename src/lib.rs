@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+use ::rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 use aes::Aes128;
 use anyhow::{anyhow, bail, Context, Result};
 use base64::Engine;
@@ -10,7 +11,6 @@ use cbc::{
     Decryptor,
 };
 use flate2::read::DeflateDecoder;
-use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 use zip::ZipArchive;
 
 #[cfg(windows)]
@@ -21,6 +21,7 @@ mod safe_strings;
 mod acsm;
 mod activation;
 mod adobe_hash;
+mod rsa;
 
 // Re-export public API
 pub use acsm::{

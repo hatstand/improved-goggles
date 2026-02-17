@@ -226,7 +226,7 @@ fn main() -> Result<()> {
                     println!("  Extracting key from registry...");
                     let key = adeptkeys()?;
                     println!("  Using key: {}", key.name);
-                    key.private_license_key
+                    key.private_license_key.clone()
                 }
 
                 #[cfg(not(windows))]
@@ -279,7 +279,7 @@ fn main() -> Result<()> {
                     println!("  Extracting key from registry...");
                     let key = adeptkeys()?;
                     println!("  Using key: {}", key.name);
-                    key.private_license_key
+                    key.private_license_key.clone()
                 }
 
                 #[cfg(not(windows))]
@@ -698,7 +698,7 @@ fn main() -> Result<()> {
                             {
                                 println!("  Extracting device key from registry...");
                                 let key = adeptkeys()?;
-                                key.private_license_key
+                                key.private_license_key.clone()
                             }
                         }
                     };
@@ -740,7 +740,7 @@ fn main() -> Result<()> {
                         {
                             println!("  Extracting device key from registry...");
                             let key = adeptkeys()?;
-                            key.private_auth_key
+                            key.private_auth_key.clone()
                         }
                     }
                 };
