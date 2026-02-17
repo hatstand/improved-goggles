@@ -334,6 +334,61 @@ pub fn adept_device() -> Result<String> {
     bail!("No device found in registry");
 }
 
+/// Extract the Adept fingerprint from Windows registry
+///
+/// Retrieves the fingerprint from the activation token stored at:
+/// `HKEY_CURRENT_USER\Software\Adobe\Adept\Activation\<activation-id>\activationToken\fingerprint`
+///
+/// # Returns
+/// The fingerprint string
+///
+/// # Errors
+/// Returns an error if the registry key is not found or cannot be accessed
+pub fn adept_fingerprint() -> Result<String> {
+    // Open main Adobe Adept registry key
+    let adept_key = CURRENT_USER
+        .open(ADEPT_PATH)
+        .context("Adobe Adept registry key not found")?;
+
+    // Enumerate all subkeys under Software\Adobe\Adept\Activation
+    let subkey_names: Vec<String> = adept_key
+        .keys()
+        .context("Failed to enumerate registry keys")?
+        .collect();
+
+    for subkey_name in subkey_names {
+        debug!("Processing subkey for fingerprint: {}", subkey_name);
+        // Open each subkey
+        let subkey = adept_key.open(&subkey_name)?;
+
+        // Get the default value (type)
+        let ktype = subkey.get_string("")?;
+
+        debug!("Subkey: {}  Type: {}", subkey_name, ktype);
+
+        // We're only interested in 'activationToken' keys
+        if ktype == "activationToken" {
+            // Enumerate sub-subkeys
+            let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+
+            for sub_subkey_name in sub_subkeys {
+                let sub_subkey = subkey.open(&sub_subkey_name)?;
+                let ktype2 = sub_subkey.get_string("")?;
+
+                debug!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
+
+                // Look for the fingerprint key
+                if ktype2 == "fingerprint" {
+                    let fingerprint_value = sub_subkey.get_string("value")?;
+                    debug!("    fingerprint value: {}", fingerprint_value);
+                    return Ok(fingerprint_value);
+                }
+            }
+        }
+    }
+    bail!("No fingerprint found in registry");
+}
+
 /// Decrypt the private license key using AES-CBC
 /// Returns the parsed RSA private key.
 fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey> {

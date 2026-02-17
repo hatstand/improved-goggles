@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[cfg(windows)]
-use rmpub::{adept_device, adept_user, adeptkeys};
+use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys};
 #[cfg(windows)]
 use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
 
@@ -83,6 +83,8 @@ enum DebugCommands {
     ExtractUser,
     /// Extract the Adept device identifier from Windows Registry
     ExtractDevice,
+    /// Extract the Adept fingerprint from Windows Registry
+    ExtractFingerprint,
 }
 
 fn main() -> Result<()> {
@@ -280,6 +282,24 @@ fn main() -> Result<()> {
 
                     println!("✓ Successfully extracted Adept device");
                     println!("  Device identifier: {}", device);
+                    Ok(())
+                }
+            }
+            DebugCommands::ExtractFingerprint => {
+                #[cfg(not(windows))]
+                {
+                    use anyhow::bail;
+                    bail!("Fingerprint extraction from registry is not supported on this platform. This command is only available on Windows.");
+                }
+
+                #[cfg(windows)]
+                {
+                    println!("Extracting Adept fingerprint from Windows Registry...");
+
+                    let fingerprint = adept_fingerprint()?;
+
+                    println!("✓ Successfully extracted Adept fingerprint");
+                    println!("  Fingerprint: {}", fingerprint);
                     Ok(())
                 }
             }
