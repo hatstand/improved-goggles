@@ -245,7 +245,8 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
 /// # Returns
 /// Vector of download URLs (src elements)
 pub fn parse_fulfillment_response(xml: &str) -> Result<Vec<String>> {
-    let doc = roxmltree::Document::parse(xml).context("Failed to parse fulfillment response XML")?;
+    let doc =
+        roxmltree::Document::parse(xml).context("Failed to parse fulfillment response XML")?;
 
     let mut urls = Vec::new();
 
@@ -784,8 +785,8 @@ mod tests {
     #[test]
     fn test_parse_fulfillment_response() {
         // Load test fulfillment response
-        let xml =
-            std::fs::read_to_string("src/testdata/fulfill.xml").expect("Failed to read fulfill.xml");
+        let xml = std::fs::read_to_string("src/testdata/fulfill.xml")
+            .expect("Failed to read fulfill.xml");
 
         let result = parse_fulfillment_response(&xml);
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());

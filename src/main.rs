@@ -3,7 +3,8 @@ use clap::{Parser, Subcommand};
 use log::debug;
 use rmpub::{
     decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key,
-    generate_fulfill_request, generate_fulfill_request_minified, parse_acsm, sign_fulfill_request,
+    generate_fulfill_request, generate_fulfill_request_minified, parse_acsm,
+    parse_fulfillment_response, sign_fulfill_request,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -324,32 +325,79 @@ fn main() -> Result<()> {
                 );
                 println!("--- End Fulfillment Request ---\n");
 
+                // Create debug trace file
+                let trace_file = output.with_extension("trace.txt");
+                let trace_content = std::cell::RefCell::new(String::new());
+                trace_content
+                    .borrow_mut()
+                    .push_str("=== ADEPT Fulfillment Debug Trace ===\n\n");
+
+                // Ensure trace file is written on scope exit
+                defer::defer! {
+                    if let Err(e) = fs::write(&trace_file, &*trace_content.borrow()) {
+                        eprintln!("Failed to write trace file: {}", e);
+                    } else {
+                        println!("  Debug trace saved to: {}", trace_file.display());
+                    }
+                }
+
                 // Make HTTP POST request to operator URL
-                println!(
-                    "  Sending fulfillment request to {}...",
-                    acsm_info.operator_url
-                );
+                // The fulfillment endpoint is operatorURL + "/Fulfill"
+                let fulfill_url =
+                    format!("{}/Fulfill", acsm_info.operator_url.trim_end_matches('/'));
+                println!("  Sending fulfillment request to {}...", fulfill_url);
+
+                // Log request
+                trace_content.borrow_mut().push_str(&format!(
+                    "--- FULFILLMENT REQUEST ---\n\
+                     POST {}\n\
+                     Accept: */*\n\
+                     Content-Type: application/vnd.adobe.adept+xml\n\
+                     User-Agent: book2png\n\
+                     Content-Length: {}\n\n\
+                     {}\n\n",
+                    fulfill_url,
+                    complete_xml.len(),
+                    complete_xml
+                ));
+
                 let client = reqwest::blocking::Client::builder()
                     .danger_accept_invalid_certs(true) // Accept invalid certificates
                     .build()?;
 
                 let response = client
-                    .post(&acsm_info.operator_url)
+                    .post(&fulfill_url)
                     .header("Accept", "*/*")
                     .header("Content-Type", "application/vnd.adobe.adept+xml")
                     .header("User-Agent", "book2png")
-                    .body(complete_xml)
+                    .body(complete_xml.clone())
                     .send()
-                    .with_context(|| {
-                        format!("Failed to send request to {}", acsm_info.operator_url)
-                    })?;
+                    .with_context(|| format!("Failed to send request to {}", fulfill_url))?;
 
                 let status = response.status();
                 println!("  Response status: {}", status);
 
+                // Log response status and headers
+                trace_content.borrow_mut().push_str(&format!(
+                    "--- FULFILLMENT RESPONSE ---\n\
+                     Status: {}\n",
+                    status
+                ));
+                for (name, value) in response.headers() {
+                    trace_content.borrow_mut().push_str(&format!(
+                        "{}: {}\n",
+                        name,
+                        value.to_str().unwrap_or("<binary>")
+                    ));
+                }
+                trace_content.borrow_mut().push_str("\n");
+
                 if !status.is_success() {
                     use anyhow::bail;
                     let response_text = response.text().unwrap_or_default();
+                    trace_content
+                        .borrow_mut()
+                        .push_str(&format!("{}\n\n", response_text));
                     bail!(
                         "Fulfillment request failed with status {}: {}",
                         status,
@@ -357,13 +405,75 @@ fn main() -> Result<()> {
                     );
                 }
 
-                // Save response to output file
-                let response_bytes = response.bytes()?;
-                fs::write(&output, &response_bytes)?;
+                // Parse the fulfillment response
+                let response_text = response.text()?;
+                trace_content
+                    .borrow_mut()
+                    .push_str(&format!("{}\n\n", response_text));
+                println!("  ✓ Received fulfillment response");
 
-                println!("✓ Successfully downloaded EPUB fulfilment");
-                println!("  Saved to: {}", output.display());
-                println!("  Size: {} bytes", response_bytes.len());
+                println!("  Parsing fulfillment response...");
+                let download_urls = parse_fulfillment_response(&response_text)?;
+                println!("  ✓ Found {} download URL(s)", download_urls.len());
+
+                // Download the first EPUB file
+                if let Some(epub_url) = download_urls.first() {
+                    println!("  Downloading EPUB from {}...", epub_url);
+
+                    // Log EPUB download request
+                    trace_content.borrow_mut().push_str(&format!(
+                        "--- EPUB DOWNLOAD REQUEST ---\n\
+                         GET {}\n\
+                         Accept: */*\n\
+                         User-Agent: book2png\n\n",
+                        epub_url
+                    ));
+
+                    let epub_response = client
+                        .get(epub_url)
+                        .header("Accept", "*/*")
+                        .header("User-Agent", "book2png")
+                        .send()
+                        .with_context(|| format!("Failed to download EPUB from {}", epub_url))?;
+
+                    let epub_status = epub_response.status();
+                    println!("  Download status: {}", epub_status);
+
+                    // Log EPUB response
+                    trace_content.borrow_mut().push_str(&format!(
+                        "--- EPUB DOWNLOAD RESPONSE ---\n\
+                         Status: {}\n",
+                        epub_status
+                    ));
+                    for (name, value) in epub_response.headers() {
+                        trace_content.borrow_mut().push_str(&format!(
+                            "{}: {}\n",
+                            name,
+                            value.to_str().unwrap_or("<binary>")
+                        ));
+                    }
+                    trace_content.borrow_mut().push_str("\n");
+
+                    if !epub_status.is_success() {
+                        use anyhow::bail;
+                        bail!("Failed to download EPUB: HTTP {}", epub_status);
+                    }
+
+                    let epub_bytes = epub_response.bytes()?;
+                    trace_content.borrow_mut().push_str(&format!(
+                        "Body: <binary data, {} bytes>\n\n",
+                        epub_bytes.len()
+                    ));
+
+                    fs::write(&output, &epub_bytes)?;
+
+                    println!("✓ Successfully downloaded EPUB");
+                    println!("  Saved to: {}", output.display());
+                    println!("  Size: {} bytes", epub_bytes.len());
+                } else {
+                    use anyhow::bail;
+                    bail!("No download URLs found in fulfillment response");
+                }
 
                 Ok(())
             }
