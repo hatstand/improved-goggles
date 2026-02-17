@@ -1,0 +1,13 @@
+<adept:targetDevice>
+    <adept:softwareVersion>12.5.4.HOBBES_VERSION_BUILD_NUMBER_X</adept:softwareVersion>
+    <adept:clientOS>Windows 8</adept:clientOS>
+    <adept:clientLocale>en</adept:clientLocale>
+    <adept:clientVersion>com.adobe.adobedigitaleditions.exe v4.5.12.112</adept:clientVersion>
+    <adept:deviceType>standalone</adept:deviceType>
+    <adept:productName>ADOBE Digitial Editions</adept:productName>
+    <adept:fingerprint>placeholder_fingerprint_base64</adept:fingerprint>
+    <adept:activationToken>
+        <adept:user>urn:uuid:e995bfd8-46ec-4740-ba98-c404d0b00c87</adept:user>
+        <adept:device>urn:uuid:b6b5c282-1f1c-467c-b0f3-3bf2124ddc3a</adept:device>
+    </adept:activationToken>
+</adept:targetDevice>

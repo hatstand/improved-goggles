@@ -2,6 +2,8 @@ use std::path::Path;
 use std::str::FromStr;
 
 use anyhow::{anyhow, Context, Result};
+use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
+use quick_xml::Writer;
 
 /// Metadata extracted from ACSM file (Dublin Core elements)
 #[derive(Debug, Clone)]
@@ -226,6 +228,72 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
     })
 }
 
+/// Generates an `<adept:targetDevice>` XML element for Adobe ADEPT fulfillment requests
+///
+/// # Arguments
+/// * `user` - User GUID (e.g., "urn:uuid:54f2e5c9-0071-46e4-8452-df4f7fe0cc3f")
+/// * `device` - Device GUID (e.g., "urn:uuid:a69fd2ee-8b78-4410-a1a1-8c782e379fb7")
+/// * `fingerprint` - Device fingerprint (base64-encoded)
+///
+/// # Returns
+/// XML string representing the targetDevice element
+pub fn generate_target_device(user: &str, device: &str, fingerprint: &str) -> String {
+    let mut writer = Writer::new_with_indent(Vec::new(), b' ', 4);
+
+    // Helper function to write a simple element with text content
+    let write_element = |writer: &mut Writer<Vec<u8>>, name: &str, text: &str| {
+        writer
+            .write_event(Event::Start(BytesStart::new(name)))
+            .unwrap();
+        writer
+            .write_event(Event::Text(BytesText::new(text)))
+            .unwrap();
+        writer.write_event(Event::End(BytesEnd::new(name))).unwrap();
+    };
+
+    // Start targetDevice
+    writer
+        .write_event(Event::Start(BytesStart::new("adept:targetDevice")))
+        .unwrap();
+
+    // Write child elements
+    write_element(
+        &mut writer,
+        "adept:softwareVersion",
+        "12.5.4.HOBBES_VERSION_BUILD_NUMBER_X",
+    );
+    write_element(&mut writer, "adept:clientOS", "Windows 8");
+    write_element(&mut writer, "adept:clientLocale", "en");
+    write_element(
+        &mut writer,
+        "adept:clientVersion",
+        "com.adobe.adobedigitaleditions.exe v4.5.12.112",
+    );
+    write_element(&mut writer, "adept:deviceType", "standalone");
+    write_element(&mut writer, "adept:productName", "ADOBE Digitial Editions");
+    write_element(&mut writer, "adept:fingerprint", fingerprint);
+
+    // Start activationToken
+    writer
+        .write_event(Event::Start(BytesStart::new("adept:activationToken")))
+        .unwrap();
+
+    write_element(&mut writer, "adept:user", user);
+    write_element(&mut writer, "adept:device", device);
+
+    // End activationToken
+    writer
+        .write_event(Event::End(BytesEnd::new("adept:activationToken")))
+        .unwrap();
+
+    // End targetDevice
+    writer
+        .write_event(Event::End(BytesEnd::new("adept:targetDevice")))
+        .unwrap();
+
+    String::from_utf8(writer.into_inner()).unwrap()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +361,22 @@ mod tests {
         );
         assert!(acsm_info.license_token.permissions.display);
         assert!(acsm_info.license_token.permissions.play);
+    }
+
+    #[test]
+    fn test_generate_target_device() {
+        let user = "urn:uuid:e995bfd8-46ec-4740-ba98-c404d0b00c87";
+        let device = "urn:uuid:b6b5c282-1f1c-467c-b0f3-3bf2124ddc3a";
+        let fingerprint = "placeholder_fingerprint_base64";
+
+        let xml = generate_target_device(user, device, fingerprint);
+
+        // Load expected XML (excluding the signature element)
+        let expected = std::fs::read_to_string("src/testdata/target_device.xml")
+            .expect("Failed to read target_device.xml");
+
+        let expected = expected.lines().collect::<Vec<_>>().join("\n");
+
+        assert_eq!(xml.trim(), expected.trim());
     }
 }
