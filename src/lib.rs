@@ -13,7 +13,7 @@ use cbc::{
     cipher::{BlockDecryptMut, KeyIvInit},
     Decryptor,
 };
-use rsa::{pkcs1::DecodeRsaPrivateKey, RsaPrivateKey};
+use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Encrypt, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
@@ -152,6 +152,29 @@ pub fn extract_epub_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
         .and_then(|n| n.text())
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow!("encryptedKey tag not found in rights.xml"))
+}
+
+/// Decrypts an encrypted key from an EPUB using an RSA private key.
+/// The encrypted key is expected to be Base64 encoded and encrypted with PKCS#1 v1.5 padding.
+///
+/// # Arguments
+/// * `encrypted_key_b64` - The Base64-encoded encrypted key from the EPUB
+/// * `rsa_key` - The RSA private key to use for decryption
+///
+/// # Returns
+/// The decrypted key as raw bytes
+pub fn decrypt_epub_key(encrypted_key_b64: &str, rsa_key: &RsaPrivateKey) -> Result<Vec<u8>> {
+    // Decode the Base64 encrypted key
+    let encrypted_key = base64::prelude::BASE64_STANDARD
+        .decode(encrypted_key_b64.trim())
+        .context("Failed to decode Base64 encrypted key")?;
+
+    // Decrypt using RSA PKCS#1 v1.5
+    let decrypted = rsa_key
+        .decrypt(Pkcs1v15Encrypt, &encrypted_key)
+        .context("Failed to decrypt key with RSA private key")?;
+
+    Ok(decrypted)
 }
 
 fn keykey() -> Result<Vec<u8>> {

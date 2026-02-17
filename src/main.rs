@@ -23,6 +23,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let in_path = PathBuf::from(&args[1]);
                     let encrypted_epub_key = extract_epub_key(in_path)?;
                     println!("Encrypted EPUB key: {}", encrypted_epub_key);
+                    let decrypted_epub_key =
+                        rmpub::decrypt_epub_key(&encrypted_epub_key, &key.key)?;
+                    println!("Decrypted EPUB key: {}", hex::encode(&decrypted_epub_key));
                 }
 
                 Ok(())
