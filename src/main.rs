@@ -1,17 +1,20 @@
 use anyhow::{Context, Result};
+use base64::prelude::BASE64_STANDARD;
 use clap::{Parser, Subcommand};
 use log::debug;
 use rmpub::{
     decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key,
     decrypt_private_key_with_iv, extract_content_key, generate_fulfill_request,
-    generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response, parse_signin_xml,
-    sign_fulfill_request, verify_fulfill_request,
+    generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response,
+    parse_signin_response, parse_signin_xml, sign_fulfill_request, verify_fulfill_request,
 };
 use std::fs;
 use std::path::PathBuf;
 
+use base64::Engine;
 use p12::PFX;
-use rsa::pkcs1::DecodeRsaPrivateKey;
+use rsa::{pkcs1::DecodeRsaPrivateKey, RsaPrivateKey};
+use x509_parser::prelude::*;
 
 #[cfg(windows)]
 use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys};
@@ -146,6 +149,11 @@ enum DebugCommands {
         /// Path to Adobe activation server's private key (for decrypting signInData, rarely available)
         #[arg(short, long)]
         server_key: Option<PathBuf>,
+    },
+    /// Parse an Adobe ADEPT signIn response (credentials) file
+    ParseSignInResponse {
+        /// Path to the signIn response XML file
+        xml: PathBuf,
     },
 }
 
@@ -873,6 +881,59 @@ fn main() -> Result<()> {
                 let license_key =
                     decrypt_private_key_with_iv(&license_key_cipher, &device_key, &license_key_iv)?;
                 println!("RSA License key: {:?}", license_key);
+
+                Ok(())
+            }
+            DebugCommands::ParseSignInResponse { xml } => {
+                println!("Parsing signIn response from: {}", xml.display());
+                let content = std::fs::read_to_string(&xml)?;
+                let response = parse_signin_response(&content)?;
+
+                println!("\n=== SignIn Response ===");
+                println!("User: {}", response.user);
+                println!(
+                    "Username: {} (method: {})",
+                    response.username, response.username_method
+                );
+                println!("PKCS12 size: {} bytes", response.pkcs12.len());
+                println!(
+                    "Encrypted private license key size: {} bytes",
+                    response.encrypted_private_license_key.len()
+                );
+                println!(
+                    "License certificate size: {} bytes",
+                    response.license_certificate.len()
+                );
+
+                let device_key = adeptkeys()?.device_key;
+                let password = base64::prelude::BASE64_STANDARD.encode(&device_key);
+                println!("Derived PKCS12 password from device key: {}", password);
+
+                let decrypted_key =
+                    p12_keystore::KeyStore::from_pkcs12(&response.pkcs12, &password)?;
+                decrypted_key
+                    .entries()
+                    .for_each(|(alias, entry)| println!("pkcs#12 {} {:?}", alias, entry));
+
+                // Parse X.509 certificate
+                println!("\n=== License Certificate ===");
+                match x509_parser::parse_x509_certificate(&response.license_certificate) {
+                    Ok((_, cert)) => {
+                        println!("Certificate parsed successfully");
+                        println!("Subject: {}", cert.subject());
+                        println!("Issuer: {}", cert.issuer());
+                        println!("Serial: {}", cert.serial);
+                        println!("Valid from: {}", cert.validity().not_before);
+                        println!("Valid to: {}", cert.validity().not_after);
+                        println!(
+                            "Signature algorithm: {}",
+                            cert.signature_algorithm.algorithm
+                        );
+                    }
+                    Err(e) => {
+                        println!("Failed to parse certificate: {:?}", e);
+                    }
+                }
 
                 Ok(())
             }

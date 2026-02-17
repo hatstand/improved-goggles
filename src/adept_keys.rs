@@ -19,7 +19,7 @@ use cbc::{
     Decryptor,
 };
 use log::debug;
-use rsa::{pkcs1::DecodeRsaPrivateKey, RsaPrivateKey};
+use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
@@ -224,6 +224,14 @@ pub fn adeptkeys() -> Result<AdeptKey> {
                         name: ("placeholder").to_string(),
                         device_key: aes_key_bytes.clone(),
                     });
+                } else if ktype2 == "pkcs12" {
+                    let value = sub_subkey.get_string("value")?;
+                    debug!("    pkcs12 value: {}", value);
+                    // let key = RsaPrivateKey::from_pkcs8_der(
+                    //     &base64::prelude::BASE64_STANDARD.decode(value)?,
+                    // )
+                    // .context("Failed to parse RSA private key from pkcs12 value")?;
+                    // println!("pkcs12: {:?}", key);
                 }
             }
         }

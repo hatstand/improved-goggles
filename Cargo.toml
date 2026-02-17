@@ -22,6 +22,7 @@ jiff = "0.2.20"
 log = "0.4.29"
 num-bigint-dig = "0.8"
 p12 = "0.6.3"
+p12-keystore = "0.2.0"
 quick-xml = "0.37"
 rand = "0.10.0"
 reqwest = { version = "0.12", features = ["blocking"] }

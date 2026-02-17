@@ -123,3 +123,99 @@ pub fn parse_signin_xml(path: &Path) -> Result<SignInData> {
         encrypted_private_license_key,
     })
 }
+
+/// Parsed Adobe ADEPT signIn response data (credentials)
+#[derive(Debug)]
+pub struct SignInResponse {
+    pub user: String,
+    pub username: String,
+    pub username_method: String,
+    pub pkcs12: Vec<u8>,
+    pub encrypted_private_license_key: Vec<u8>,
+    pub license_certificate: Vec<u8>,
+}
+
+/// Parse an Adobe ADEPT signIn response XML file
+///
+/// # Arguments
+/// * `path` - Path to the signIn response XML file (credentials)
+///
+/// # Returns
+/// Parsed SignInResponse structure with decoded fields
+pub fn parse_signin_response(contents: &str) -> Result<SignInResponse> {
+    // Parse XML
+    let doc =
+        roxmltree::Document::parse(contents).context("Failed to parse signIn response XML")?;
+
+    // Find the credentials element
+    let credentials_node = doc
+        .descendants()
+        .find(|n| n.has_tag_name("credentials"))
+        .context("No credentials element found")?;
+
+    // Extract user
+    let user = credentials_node
+        .descendants()
+        .find(|n| n.has_tag_name("user"))
+        .and_then(|n| n.text())
+        .context("No user element found")?
+        .to_string();
+
+    // Extract username and method
+    let username_node = doc
+        .descendants()
+        .find(|n| n.has_tag_name("username"))
+        .context("No username element found")?;
+
+    let username_method = username_node
+        .attribute("method")
+        .unwrap_or("unknown")
+        .to_string();
+
+    let username = username_node.text().unwrap_or("").to_string();
+
+    // Extract pkcs12
+    let pkcs12_b64 = doc
+        .descendants()
+        .find(|n| n.has_tag_name("pkcs12"))
+        .and_then(|n| n.text())
+        .context("No pkcs12 element found")?;
+
+    let pkcs12 = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, pkcs12_b64)
+        .context("Failed to decode pkcs12")?;
+
+    // Extract encryptedPrivateLicenseKey
+    let encrypted_private_license_key_b64 = doc
+        .descendants()
+        .find(|n| n.has_tag_name("encryptedPrivateLicenseKey"))
+        .and_then(|n| n.text())
+        .context("No encryptedPrivateLicenseKey element found")?;
+
+    let encrypted_private_license_key = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        encrypted_private_license_key_b64,
+    )
+    .context("Failed to decode encryptedPrivateLicenseKey")?;
+
+    // Extract licenseCertificate
+    let license_certificate_b64 = doc
+        .descendants()
+        .find(|n| n.has_tag_name("licenseCertificate"))
+        .and_then(|n| n.text())
+        .context("No licenseCertificate element found")?;
+
+    let license_certificate = base64::Engine::decode(
+        &base64::engine::general_purpose::STANDARD,
+        license_certificate_b64,
+    )
+    .context("Failed to decode licenseCertificate")?;
+
+    Ok(SignInResponse {
+        user,
+        username,
+        username_method,
+        pkcs12,
+        encrypted_private_license_key,
+        license_certificate,
+    })
+}

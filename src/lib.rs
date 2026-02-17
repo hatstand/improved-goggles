@@ -27,7 +27,7 @@ pub use acsm::{
     parse_acsm, parse_fulfillment_response, sign_fulfill_request, verify_fulfill_request, AcsmInfo,
     AcsmLicenseToken, AcsmMetadata, AcsmPermissions,
 };
-pub use activation::{parse_signin_xml, SignInData};
+pub use activation::{parse_signin_response, parse_signin_xml, SignInData, SignInResponse};
 #[cfg(windows)]
 pub use adept_keys::{
     adept_device, adept_fingerprint, adept_user, adeptkeys, decrypt_private_key,
