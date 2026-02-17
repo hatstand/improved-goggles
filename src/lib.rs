@@ -13,6 +13,7 @@ use cbc::{
     cipher::{BlockDecryptMut, KeyIvInit},
     Decryptor,
 };
+use flate2::read::DeflateDecoder;
 use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Encrypt, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
@@ -125,7 +126,7 @@ fn device_entropy() -> Result<[u8; 32]> {
 
 /// Extracts the encrypted key from an EPUB file.
 /// The key is located in META-INF/rights.xml inside the `encryptedKey` XML tag.
-pub fn extract_epub_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
+pub fn extract_content_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
     // Open the EPUB file (which is a ZIP archive)
     let file = File::open(epub_path.as_ref())
         .with_context(|| format!("Failed to open EPUB file: {:?}", epub_path.as_ref()))?;
@@ -163,7 +164,7 @@ pub fn extract_epub_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
 ///
 /// # Returns
 /// The decrypted key as raw bytes
-pub fn decrypt_epub_key(encrypted_key_b64: &str, rsa_key: &RsaPrivateKey) -> Result<Vec<u8>> {
+pub fn decrypt_content_key(encrypted_key_b64: &str, rsa_key: &RsaPrivateKey) -> Result<Vec<u8>> {
     // Decode the Base64 encrypted key
     let encrypted_key = base64::prelude::BASE64_STANDARD
         .decode(encrypted_key_b64.trim())
@@ -175,6 +176,83 @@ pub fn decrypt_epub_key(encrypted_key_b64: &str, rsa_key: &RsaPrivateKey) -> Res
         .context("Failed to decrypt key with RSA private key")?;
 
     Ok(decrypted)
+}
+
+/// Decrypts a single file from an EPUB using the decrypted AES key.
+/// Adobe ADEPT DRM uses AES-128 CBC encryption with the IV stored as the first 16 bytes of each encrypted file.
+///
+/// # Arguments
+/// * `epub_path` - Path to the EPUB file
+/// * `file_path` - Path to the file within the EPUB (e.g., "OEBPS/chapter1.xhtml")
+/// * `decrypted_key` - The decrypted AES key (obtained from decrypt_epub_key)
+///
+/// # Returns
+/// The decrypted file contents as bytes
+pub fn decrypt_epub_file<P: AsRef<Path>>(
+    epub_path: P,
+    file_path: &str,
+    decrypted_key: &[u8],
+) -> Result<Vec<u8>> {
+    // Open the EPUB file
+    let file = File::open(epub_path.as_ref())
+        .with_context(|| format!("Failed to open EPUB file: {:?}", epub_path.as_ref()))?;
+    let reader = BufReader::new(file);
+    let mut archive = ZipArchive::new(reader).context("Failed to read EPUB as ZIP archive")?;
+
+    // Extract the encrypted file
+    let mut encrypted_file = archive
+        .by_name(file_path)
+        .with_context(|| format!("File '{}' not found in EPUB", file_path))?;
+
+    // Read the encrypted content
+    let mut encrypted_data = Vec::new();
+    encrypted_file
+        .read_to_end(&mut encrypted_data)
+        .context("Failed to read encrypted file")?;
+
+    // The first 16 bytes are the IV
+    if encrypted_data.len() < 16 {
+        bail!("Encrypted file too short (must be at least 16 bytes for IV)");
+    }
+
+    let iv = &encrypted_data[..16];
+    // let iv = [0u8; 16]; // Adobe ADEPT uses a fixed IV of 16 zero bytes
+    // let ciphertext = &encrypted_data[16..];
+    let ciphertext = &encrypted_data[16..]; // The Python code seems to use the entire file as ciphertext, including the IV
+
+    // Ensure key is 16 bytes (AES-128)
+    if decrypted_key.len() != 16 {
+        bail!(
+            "Decrypted key must be 16 bytes for AES-128, got {}",
+            decrypted_key.len()
+        );
+    }
+
+    // Create AES-128-CBC cipher
+    let cipher = Aes128CbcDec::new(decrypted_key.into(), iv.into());
+
+    // Decrypt the content
+    let mut decrypted = ciphertext.to_vec();
+    let decrypted_data = cipher
+        .decrypt_padded_mut::<cbc::cipher::block_padding::Pkcs7>(&mut decrypted)
+        .map_err(|e| anyhow!("Failed to decrypt file content: {:?}", e))?;
+
+    // Decompress using raw deflate (equivalent to zlib.decompressobj(-15) in Python)
+    // If decompression fails, return the raw decrypted bytes (they might not be compressed)
+    let decompressed = decompress_deflate(decrypted_data)?;
+
+    Ok(decompressed)
+}
+
+/// Decompresses data using raw deflate (no zlib/gzip headers).
+/// This matches Python's zlib.decompressobj(-15) behavior.
+fn decompress_deflate(data: &[u8]) -> Result<Vec<u8>> {
+    let mut decoder = DeflateDecoder::new(data);
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .context("Deflate decompression failed")?;
+    Ok(decompressed)
 }
 
 fn keykey() -> Result<Vec<u8>> {
@@ -249,9 +327,6 @@ pub fn adeptkeys() -> Result<AdeptKey> {
             // Enumerate sub-subkeys
             let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
 
-            // Store credential info for building key name
-            let mut aes_key: Option<Vec<u8>> = None;
-
             for sub_subkey_name in sub_subkeys {
                 let sub_subkey = subkey.open(&sub_subkey_name)?;
                 let ktype2 = sub_subkey.get_string("")?;
@@ -295,6 +370,11 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey>
     // Create cipher
     let cipher = Aes128CbcDec::new(&aes_key.into(), &iv.into());
 
+    println!(
+        "Decrypting private key with AES-128-CBC. Encrypted data length: {} bytes",
+        encrypted.len()
+    );
+
     // Decrypt
     let mut decrypted = encrypted.clone();
     let decrypted_data = cipher
@@ -316,6 +396,13 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey>
 
     // Parse the DER-encoded RSA private key (this creates an owned RsaPrivateKey)
     let der_bytes = &unpadded[26..];
+
+    println!(
+        "DER-encoded RSA private key (len={}): {}",
+        der_bytes.len(),
+        hex::encode(der_bytes)
+    );
+
     RsaPrivateKey::from_pkcs1_der(der_bytes)
         .context("Failed to parse RSA private key from decrypted data")
 }
