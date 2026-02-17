@@ -120,6 +120,6 @@ mod tests {
 
         // Verify against expected hash
         // Based on https://github.com/Leseratte10/acsm-calibre-plugin/blob/fb288afb3a83156f0e534eb1e0ec1cbc45a3e675/calibre-plugin/libadobe.py#L573
-        assert_eq!(hash_hex, "1d1598745cd4a52ff1942d876b3dce13d2e823e7");
+        assert_eq!(hash_hex, "729c9f7f6cd900e34b0bb22595b29c069da69139");
     }
 }

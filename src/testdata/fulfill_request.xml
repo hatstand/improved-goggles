@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<adept:fulfill xmlns:adept="http://ns.adobe.com/adept">
+  <adept:user>urn:uuid:64c4c430-cad6-46cc-b88b-4c838a1f76f8</adept:user>
+  <adept:device>urn:uuid:42f0e5f1-0069-4742-8cf4-8fac04dd4323</adept:device>
+  <adept:deviceType>standalone</adept:deviceType>
+  <fulfillmentToken xmlns="http://ns.adobe.com/adept" fulfillmentType="buy" auth="user">
+    <distributor>urn:uuid:d051ad0d-03ed-4b63-b257-5bfe2e304a80</distributor>
+    <operatorURL>http://acs.ebookscorporation.com/fulfillment</operatorURL>
+    <transaction>ABC-123456789</transaction>
+    <purchase>2026-02-17T15:00:59+00:00</purchase>
+    <expiration>2026-02-17T21:00:59+00:00</expiration>
+    <resourceItemInfo>
+      <resource>urn:uuid:e0000000-0000-0000-0000-000123456789</resource>
+      <resourceItem>1</resourceItem>
+      <metadata>
+        <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Against All Gods</dc:title>
+        <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Cameron, Miles</dc:creator>
+        <dc:publisher xmlns:dc="http://purl.org/dc/elements/1.1/">Orion</dc:publisher>
+        <dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/">URN:ISBN:9781473232532</dc:identifier>
+        <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/epub+zip</dc:format>
+        <dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">en</dc:language>
+      </metadata>
+      <licenseToken>
+        <resource>urn:uuid:e0000000-0000-0000-0000-000123456789</resource>
+        <permissions>
+          <display/>
+          <play/>
+        </permissions>
+      </licenseToken>
+    </resourceItemInfo>
+    <hmac>placeholder_base64_mac</hmac>
+  </fulfillmentToken>
+  <adept:targetDevice>
+    <adept:softwareVersion>12.5.4.HOBBES_VERSION_BUILD_NUMBER_X</adept:softwareVersion>
+    <adept:clientOS>Windows 8</adept:clientOS>
+    <adept:clientLocale>en</adept:clientLocale>
+    <adept:clientVersion>com.adobe.adobedigitaleditions.exe v4.5.12.112</adept:clientVersion>
+    <adept:deviceType>standalone</adept:deviceType>
+    <adept:productName>ADOBE Digitial Editions</adept:productName>
+    <adept:fingerprint>placeholder_fingerprint_base64</adept:fingerprint>
+    <adept:activationToken>
+      <adept:user>urn:uuid:64c4c430-cad6-46cc-b88b-4c838a1f76f8</adept:user>
+      <adept:device>urn:uuid:42f0e5f1-0069-4742-8cf4-8fac04dd4323</adept:device>
+    </adept:activationToken>
+  </adept:targetDevice>
+  <adept:signature>LTPtZVql3D8VH0bOYXhQVVlfxuhpgrhH4xbLKQfTslIF+GHqrYazMPgN7NeN1LwEgt2uc7ADzMyRVO+JDnZh8l43JxjCyOYErrmTzzaqDqwa5NcVIgGYCyVw50EstFP7HzKYHX4yFs3ZhUjtAmotoiwv3H74tJJ6+y5ow9LptGg=</adept:signature>
+</adept:fulfill>
