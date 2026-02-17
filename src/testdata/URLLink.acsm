@@ -1,0 +1,27 @@
+<fulfillmentToken fulfillmentType="buy" auth="user" xmlns="http://ns.adobe.com/adept">
+  <distributor>urn:uuid:d051ad0d-03ed-4b63-b257-5bfe2e304a80</distributor>
+  <operatorURL>http://acs.ebookscorporation.com/fulfillment</operatorURL>
+  <transaction>ABC-123456789</transaction>
+  <purchase>2026-02-17T15:00:59+00:00</purchase>
+  <expiration>2026-02-17T21:00:59+00:00</expiration>
+  <resourceItemInfo>
+    <resource>urn:uuid:e0000000-0000-0000-0000-000123456789</resource>
+    <resourceItem>1</resourceItem>
+    <metadata>
+      <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Against All Gods</dc:title>
+      <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Cameron, Miles</dc:creator>
+      <dc:publisher xmlns:dc="http://purl.org/dc/elements/1.1/">Orion</dc:publisher>
+      <dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/">URN:ISBN:9781473232532</dc:identifier>
+      <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/epub+zip</dc:format>
+      <dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">en</dc:language>
+    </metadata>
+    <licenseToken>
+      <resource>urn:uuid:e0000000-0000-0000-0000-000123456789</resource>
+      <permissions>
+        <display/>
+        <play/>
+      </permissions>
+    </licenseToken>
+  </resourceItemInfo>
+  <hmac>placeholder_base64_mac</hmac>
+</fulfillmentToken>

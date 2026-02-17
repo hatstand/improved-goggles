@@ -444,4 +444,32 @@ mod tests {
         let username = adobe_username().expect("Failed to get Adobe username");
         assert_eq!(username.len(), 5);
     }
+
+    #[test]
+    fn test_parse_acsm() {
+        // Test parsing the URLLink.acsm test file
+        let acsm_path = "src/testdata/URLLink.acsm";
+        let result = parse_acsm(acsm_path);
+
+        assert!(result.is_ok(), "Failed to parse ACSM: {:?}", result.err());
+
+        let acsm_info = result.unwrap();
+
+        // Verify the parsed fields
+        assert_eq!(
+            acsm_info.operator_url,
+            "http://acs.ebookscorporation.com/fulfillment"
+        );
+        assert_eq!(
+            acsm_info.resource_id,
+            "urn:uuid:e0000000-0000-0000-0000-000123456789"
+        );
+        assert_eq!(acsm_info.transaction_id, "ABC-123456789");
+        assert_eq!(acsm_info.hmac, "placeholder_base64_mac");
+
+        // Verify expiration timestamp is parsed correctly
+        // Expected: 2026-02-17T21:00:59+00:00
+        let expiration_str = acsm_info.expiration.to_string();
+        assert!(expiration_str.contains("2026-02-17T21:00:59"));
+    }
 }
