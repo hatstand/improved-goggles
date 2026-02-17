@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
 use rsa::{Pkcs1v15Sign, RsaPrivateKey};
@@ -235,6 +235,34 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
         license_token,
         fulfillment_token_xml,
     })
+}
+
+/// Parse fulfillment response and extract download URLs
+///
+/// # Arguments
+/// * `xml` - The fulfillment response XML from the operator
+///
+/// # Returns
+/// Vector of download URLs (src elements)
+pub fn parse_fulfillment_response(xml: &str) -> Result<Vec<String>> {
+    let doc = roxmltree::Document::parse(xml).context("Failed to parse fulfillment response XML")?;
+
+    let mut urls = Vec::new();
+
+    // Find all src elements within resourceItemInfo
+    for node in doc.descendants() {
+        if node.has_tag_name("src") {
+            if let Some(url) = node.text() {
+                urls.push(url.trim().to_string());
+            }
+        }
+    }
+
+    if urls.is_empty() {
+        bail!("No download URLs found in fulfillment response");
+    }
+
+    Ok(urls)
 }
 
 /// Generates an `<adept:targetDevice>` XML element for Adobe ADEPT fulfillment requests
@@ -751,5 +779,27 @@ mod tests {
 
         // Verify it ends correctly
         assert!(xml.ends_with("</adept:fulfill>"));
+    }
+
+    #[test]
+    fn test_parse_fulfillment_response() {
+        // Load test fulfillment response
+        let xml =
+            std::fs::read_to_string("src/testdata/fulfill.xml").expect("Failed to read fulfill.xml");
+
+        let result = parse_fulfillment_response(&xml);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+
+        let urls = result.unwrap();
+
+        // Should find at least one URL
+        assert!(!urls.is_empty(), "No URLs found");
+
+        // Verify the expected URL is present
+        assert_eq!(urls.len(), 1);
+        assert_eq!(
+            urls[0],
+            "http://fulfill.ebookscorporation.com/epub/210/2103/210397/210397260.epub"
+        );
     }
 }

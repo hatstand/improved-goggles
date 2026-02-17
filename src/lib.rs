@@ -23,7 +23,8 @@ mod acsm;
 // Re-export public API
 pub use acsm::{
     generate_fulfill_request, generate_fulfill_request_minified, generate_target_device,
-    parse_acsm, sign_fulfill_request, AcsmInfo, AcsmLicenseToken, AcsmMetadata, AcsmPermissions,
+    parse_acsm, parse_fulfillment_response, sign_fulfill_request, AcsmInfo, AcsmLicenseToken,
+    AcsmMetadata, AcsmPermissions,
 };
 #[cfg(windows)]
 pub use adept_keys::{adept_device, adept_fingerprint, adept_user, adeptkeys, AdeptKey};
