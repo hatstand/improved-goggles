@@ -42,6 +42,8 @@ pub struct AcsmInfo {
     pub hmac: String,
     pub metadata: AcsmMetadata,
     pub license_token: AcsmLicenseToken,
+    /// Raw fulfillmentToken XML (preserves HMAC)
+    pub fulfillment_token_xml: String,
 }
 
 /// Parses an ACSM file and extracts download information
@@ -215,6 +217,10 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
             },
         );
 
+    // Extract raw fulfillmentToken XML to preserve HMAC
+    // The entire ACSM content is the fulfillmentToken element
+    let fulfillment_token_xml = content.trim().to_string();
+
     Ok(AcsmInfo {
         distributor,
         operator_url,
@@ -225,6 +231,7 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
         hmac,
         metadata,
         license_token,
+        fulfillment_token_xml,
     })
 }
 
@@ -292,6 +299,68 @@ pub fn generate_target_device(user: &str, device: &str, fingerprint: &str) -> St
         .unwrap();
 
     String::from_utf8(writer.into_inner()).unwrap()
+}
+
+/// Generates a fulfill request XML for Adobe ADEPT fulfillment
+///
+/// # Arguments
+/// * `acsm_info` - Parsed ACSM information (includes raw fulfillmentToken XML)
+/// * `user` - User GUID (e.g., "urn:uuid:54f2e5c9-0071-46e4-8452-df4f7fe0cc3f")
+/// * `device` - Device GUID (e.g., "urn:uuid:a69fd2ee-8b78-4410-a1a1-8c782e379fb7")
+/// * `fingerprint` - Device fingerprint (base64-encoded)
+///
+/// # Returns
+/// XML string representing the fulfill request
+pub fn generate_fulfill_request(
+    acsm_info: &AcsmInfo,
+    user: &str,
+    device: &str,
+    fingerprint: &str,
+) -> String {
+    let mut result = String::from("<?xml version=\"1.0\"?>\n");
+    result.push_str("<adept:fulfill xmlns:adept=\"http://ns.adobe.com/adept\">\n");
+
+    // Add user, device, deviceType
+    result.push_str(&format!("  <adept:user>{}</adept:user>\n", user));
+    result.push_str(&format!("  <adept:device>{}</adept:device>\n", device));
+    result.push_str("  <adept:deviceType>standalone</adept:deviceType>\n");
+
+    // Add the raw fulfillmentToken XML with proper indentation
+    // The fulfillmentToken XML should be indented by 2 spaces
+    let indented_token = acsm_info
+        .fulfillment_token_xml
+        .lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                format!("  {}", line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    result.push_str(&indented_token);
+    result.push('\n');
+
+    // Add targetDevice
+    let target_device = generate_target_device(user, device, fingerprint);
+    let indented_target = target_device
+        .lines()
+        .map(|line| {
+            if line.trim().is_empty() {
+                String::new()
+            } else {
+                format!("  {}", line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    result.push_str(&indented_target);
+    result.push('\n');
+
+    result.push_str("</adept:fulfill>\n");
+
+    result
 }
 
 #[cfg(test)]
@@ -378,5 +447,46 @@ mod tests {
         let expected = expected.lines().collect::<Vec<_>>().join("\n");
 
         assert_eq!(xml.trim(), expected.trim());
+    }
+
+    #[test]
+    fn test_generate_fulfill_request() {
+        let user = "urn:uuid:e995bfd8-46ec-4740-ba98-c404d0b00c87";
+        let device = "urn:uuid:b6b5c282-1f1c-467c-b0f3-3bf2124ddc3a";
+        let fingerprint = "placeholder_fingerprint_base64";
+
+        // Parse the test ACSM file
+        let acsm_info =
+            parse_acsm("src/testdata/URLLink.acsm").expect("Failed to parse test ACSM file");
+
+        let xml = generate_fulfill_request(&acsm_info, user, device, fingerprint);
+
+        // Parse the generated XML to verify structure
+        let doc = roxmltree::Document::parse(&xml).expect("Generated XML should be valid");
+
+        // Verify root element
+        assert_eq!(doc.root_element().tag_name().name(), "fulfill");
+
+        // Verify required elements are present
+        assert!(doc.descendants().any(|n| n.has_tag_name("user")));
+        assert!(doc.descendants().any(|n| n.has_tag_name("device")));
+        assert!(doc.descendants().any(|n| n.has_tag_name("deviceType")));
+        assert!(doc
+            .descendants()
+            .any(|n| n.has_tag_name("fulfillmentToken")));
+        assert!(doc.descendants().any(|n| n.has_tag_name("targetDevice")));
+        assert!(doc.descendants().any(|n| n.has_tag_name("hmac")));
+        assert!(doc.descendants().any(|n| n.has_tag_name("fingerprint")));
+
+        // Verify no signature element (we don't generate that)
+        assert!(!doc.descendants().any(|n| n.has_tag_name("signature")));
+
+        // Verify the passed values appear in the XML
+        assert!(xml.contains(user));
+        assert!(xml.contains(device));
+        assert!(xml.contains(fingerprint));
+
+        // Verify the HMAC from ACSM is preserved
+        assert!(xml.contains(&acsm_info.hmac));
     }
 }
