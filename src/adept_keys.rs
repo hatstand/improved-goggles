@@ -224,6 +224,61 @@ pub fn adeptkeys() -> Result<AdeptKey> {
     bail!("No credentials found in registry");
 }
 
+/// Extract the Adept user GUID from Windows registry
+///
+/// Retrieves the user GUID from the activation credentials stored at:
+/// `HKEY_CURRENT_USER\Software\Adobe\Adept\Activation\<activation-id>\credentials\user`
+///
+/// # Returns
+/// The user GUID string
+///
+/// # Errors
+/// Returns an error if the registry key is not found or cannot be accessed
+pub fn adept_user() -> Result<String> {
+    // Open main Adobe Adept registry key
+    let adept_key = CURRENT_USER
+        .open(ADEPT_PATH)
+        .context("Adobe Adept registry key not found")?;
+
+    // Enumerate all subkeys under Software\Adobe\Adept\Activation
+    let subkey_names: Vec<String> = adept_key
+        .keys()
+        .context("Failed to enumerate registry keys")?
+        .collect();
+
+    for subkey_name in subkey_names {
+        debug!("Processing subkey for user: {}", subkey_name);
+        // Open each subkey
+        let subkey = adept_key.open(&subkey_name)?;
+
+        // Get the default value (type)
+        let ktype = subkey.get_string("")?;
+
+        debug!("Subkey: {}  Type: {}", subkey_name, ktype);
+
+        // We're only interested in 'credentials' keys
+        if ktype == "credentials" {
+            // Enumerate sub-subkeys
+            let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+
+            for sub_subkey_name in sub_subkeys {
+                let sub_subkey = subkey.open(&sub_subkey_name)?;
+                let ktype2 = sub_subkey.get_string("")?;
+
+                debug!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
+
+                // Look for the user key
+                if ktype2 == "user" {
+                    let user_value = sub_subkey.get_string("value")?;
+                    debug!("    user value: {}", user_value);
+                    return Ok(user_value);
+                }
+            }
+        }
+    }
+    bail!("No user found in registry");
+}
+
 /// Decrypt the private license key using AES-CBC
 /// Returns the parsed RSA private key.
 fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey> {

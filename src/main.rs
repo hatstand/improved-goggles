@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 #[cfg(windows)]
-use rmpub::adeptkeys;
+use rmpub::{adept_user, adeptkeys};
 #[cfg(windows)]
 use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
 
@@ -70,6 +70,17 @@ enum Commands {
         #[arg(short, long)]
         key: Option<PathBuf>,
     },
+    /// Debug commands for development and troubleshooting
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Extract the Adept user GUID from Windows Registry
+    ExtractUser,
 }
 
 fn main() -> Result<()> {
@@ -233,5 +244,25 @@ fn main() -> Result<()> {
 
             Ok(())
         }
+        Commands::Debug { command } => match command {
+            DebugCommands::ExtractUser => {
+                #[cfg(not(windows))]
+                {
+                    use anyhow::bail;
+                    bail!("User extraction from registry is not supported on this platform. This command is only available on Windows.");
+                }
+
+                #[cfg(windows)]
+                {
+                    println!("Extracting Adept user from Windows Registry...");
+
+                    let user = adept_user()?;
+
+                    println!("✓ Successfully extracted Adept user");
+                    println!("  User GUID: {}", user);
+                    Ok(())
+                }
+            }
+        },
     }
 }
