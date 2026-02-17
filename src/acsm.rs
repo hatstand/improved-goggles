@@ -14,6 +14,20 @@ pub struct AcsmMetadata {
     pub language: Option<String>,
 }
 
+/// License token permissions
+#[derive(Debug, Clone)]
+pub struct AcsmPermissions {
+    pub display: bool,
+    pub play: bool,
+}
+
+/// License token information
+#[derive(Debug, Clone)]
+pub struct AcsmLicenseToken {
+    pub resource: String,
+    pub permissions: AcsmPermissions,
+}
+
 /// Information extracted from an ACSM file
 #[derive(Debug)]
 pub struct AcsmInfo {
@@ -25,6 +39,7 @@ pub struct AcsmInfo {
     pub expiration: jiff::Timestamp,
     pub hmac: String,
     pub metadata: AcsmMetadata,
+    pub license_token: AcsmLicenseToken,
 }
 
 /// Parses an ACSM file and extracts download information
@@ -155,6 +170,49 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
             },
         );
 
+    // Extract license token
+    let license_token = doc
+        .descendants()
+        .find(|n| n.has_tag_name("licenseToken"))
+        .map_or_else(
+            || AcsmLicenseToken {
+                resource: String::new(),
+                permissions: AcsmPermissions {
+                    display: false,
+                    play: false,
+                },
+            },
+            |license_node| {
+                let resource = license_node
+                    .descendants()
+                    .find(|n| n.has_tag_name("resource"))
+                    .and_then(|n| n.text())
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+
+                let permissions_node = license_node
+                    .descendants()
+                    .find(|n| n.has_tag_name("permissions"));
+
+                let permissions = if let Some(perms) = permissions_node {
+                    AcsmPermissions {
+                        display: perms.descendants().any(|n| n.has_tag_name("display")),
+                        play: perms.descendants().any(|n| n.has_tag_name("play")),
+                    }
+                } else {
+                    AcsmPermissions {
+                        display: false,
+                        play: false,
+                    }
+                };
+
+                AcsmLicenseToken {
+                    resource,
+                    permissions,
+                }
+            },
+        );
+
     Ok(AcsmInfo {
         distributor,
         operator_url,
@@ -164,6 +222,7 @@ pub fn parse_acsm<P: AsRef<Path>>(acsm_path: P) -> Result<AcsmInfo> {
         expiration,
         hmac,
         metadata,
+        license_token,
     })
 }
 
@@ -226,5 +285,13 @@ mod tests {
             Some("application/epub+zip".to_string())
         );
         assert_eq!(acsm_info.metadata.language, Some("en".to_string()));
+
+        // Verify license token is extracted
+        assert_eq!(
+            acsm_info.license_token.resource,
+            "urn:uuid:e0000000-0000-0000-0000-000123456789"
+        );
+        assert!(acsm_info.license_token.permissions.display);
+        assert!(acsm_info.license_token.permissions.play);
     }
 }
