@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -6,7 +7,7 @@ use num_bigint_dig::BigUint;
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
 use rsa::traits::PublicKeyParts;
-use rsa::RsaPrivateKey;
+use rsa::{Pkcs1v15Sign, RsaPrivateKey, RsaPublicKey};
 use sha1::{Digest, Sha1};
 
 /// Metadata extracted from ACSM file (Dublin Core elements)
@@ -531,7 +532,10 @@ fn hash_xml_document(xml: &str) -> Result<Vec<u8>> {
     let mut hasher = Sha1::new();
     hash_node_recursive(doc.root_element(), &mut hasher);
 
-    Ok(hasher.finalize().to_vec())
+    let ret = hasher.finalize().to_vec();
+    assert_eq!(ret.len(), 20, "SHA-1 hash should be 20 bytes");
+
+    Ok(ret)
 }
 
 /// Sign fulfill request XML with device key
@@ -584,6 +588,67 @@ pub fn sign_fulfill_request(xml: &str, private_key: &RsaPrivateKey) -> Result<St
         &base64::engine::general_purpose::STANDARD,
         &final_sig,
     ))
+}
+
+/// Verify the RSA signature in a fulfill request XML
+///
+/// This extracts the signature element, removes it from the XML,
+/// hashes the remaining content, and verifies the signature using PKCS#1 v1.5.
+///
+/// # Arguments
+/// * `xml_path` - Path to the fulfill request XML file
+/// * `private_key` - RSA private key (public key derived from it)
+///
+/// # Returns
+/// Ok(true) if signature is valid, Ok(false) if invalid, Err on parse/verification errors
+pub fn verify_fulfill_request(xml_path: &Path, private_key: &RsaPrivateKey) -> Result<bool> {
+    // Read the XML file
+    let xml_content = fs::read_to_string(xml_path)
+        .with_context(|| format!("Failed to read XML file: {}", xml_path.display()))?;
+
+    // Parse XML to extract signature
+    let doc =
+        roxmltree::Document::parse(&xml_content).context("Failed to parse fulfill request XML")?;
+
+    // Find the signature element
+    let signature_node = doc
+        .descendants()
+        .find(|n| {
+            n.has_tag_name("signature")
+                && n.tag_name().namespace() == Some("http://ns.adobe.com/adept")
+        })
+        .context("No adept:signature element found in XML")?;
+
+    let signature_b64 = signature_node
+        .text()
+        .context("Signature element has no text content")?
+        .trim();
+
+    // Decode the base64 signature
+    let signature_bytes =
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, signature_b64)
+            .context("Failed to decode base64 signature")?;
+
+    // Hash the XML content (Adobe's custom hashing algorithm)
+    let hash = hash_xml_document(&xml_content)?;
+
+    // Convert private key to public key
+    let public_key = RsaPublicKey::from(private_key);
+
+    let out = BigUint::from_bytes_be(&signature_bytes).modpow(public_key.e(), public_key.n());
+    let reversed_hash = out.to_bytes_be();
+
+    println!(
+        "Reversed hash (for debugging): {}",
+        hex::encode(&reversed_hash)
+    );
+
+    // Verify using PKCS#1 v1.5 with no digest identifier (unprefixed)
+    // Adobe uses raw RSA with PKCS#1 v1.5 padding on the hash directly
+    match public_key.verify(Pkcs1v15Sign::new_unprefixed(), &hash, &signature_bytes) {
+        Ok(()) => Ok(true),
+        Err(_) => Ok(false),
+    }
 }
 
 #[cfg(test)]

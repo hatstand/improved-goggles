@@ -2,13 +2,15 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::debug;
 use rmpub::{
-    decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key,
-    generate_fulfill_request, generate_fulfill_request_minified, parse_acsm,
-    parse_fulfillment_response, sign_fulfill_request,
+    decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key,
+    decrypt_private_key_with_iv, extract_content_key, generate_fulfill_request,
+    generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response, parse_signin_xml,
+    sign_fulfill_request, verify_fulfill_request,
 };
 use std::fs;
 use std::path::PathBuf;
 
+use p12::PFX;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 
 #[cfg(windows)]
@@ -113,6 +115,37 @@ enum DebugCommands {
         /// Include signature in the output
         #[arg(short, long)]
         sign: bool,
+    },
+    /// Verify the RSA signature in a fulfill request XML file
+    VerifySignature {
+        /// Path to the fulfill request XML file
+        xml: PathBuf,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
+    },
+    /// Read a PKCS12 file and display its contents
+    ReadPkcs12 {
+        /// Path to the PKCS12 (.p12 or .pfx) file
+        file: PathBuf,
+
+        /// Password for the PKCS12 file (optional)
+        #[arg(short, long)]
+        password: Option<String>,
+    },
+    /// Parse an Adobe ADEPT signIn XML file and decrypt keys
+    ParseSignIn {
+        /// Path to the signIn XML file
+        xml: PathBuf,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key_path: Option<PathBuf>,
+
+        /// Path to Adobe activation server's private key (for decrypting signInData, rarely available)
+        #[arg(short, long)]
+        server_key: Option<PathBuf>,
     },
 }
 
@@ -647,6 +680,199 @@ fn main() -> Result<()> {
                     // Output the unsigned request
                     println!("\n{}", fulfill_xml);
                 }
+
+                Ok(())
+            }
+            DebugCommands::VerifySignature { xml, key } => {
+                println!("Verifying signature in fulfill request XML...");
+                println!("  XML file: {}", xml.display());
+
+                // Load the private key (to derive public key from it)
+                let private_key = match key {
+                    Some(key_path) => {
+                        println!("  Loading device key from {}...", key_path.display());
+                        let key_bytes = fs::read(&key_path)
+                            .with_context(|| format!("Failed to read key file: {:?}", key_path))?;
+                        rsa::RsaPrivateKey::from_pkcs1_der(&key_bytes)
+                            .context("Failed to parse device key")?
+                    }
+                    None => {
+                        #[cfg(not(windows))]
+                        {
+                            use anyhow::bail;
+                            bail!("Key file must be provided with --key on non-Windows platforms");
+                        }
+                        #[cfg(windows)]
+                        {
+                            println!("  Extracting device key from registry...");
+                            let key = adeptkeys()?;
+                            key.key
+                        }
+                    }
+                };
+
+                println!("  ✓ Loaded private key");
+
+                // Verify the signature
+                let is_valid = verify_fulfill_request(&xml, &private_key)?;
+
+                if is_valid {
+                    println!("✓ Signature is VALID");
+                } else {
+                    println!("✗ Signature is INVALID");
+                }
+
+                Ok(())
+            }
+            DebugCommands::ReadPkcs12 { file, password } => {
+                println!("Reading PKCS12 file...");
+                println!("  File: {}", file.display());
+
+                // Read the PKCS12 file
+                let pfx_data = fs::read(&file)
+                    .with_context(|| format!("Failed to read PKCS12 file: {}", file.display()))?;
+
+                // Parse the PKCS12 file
+                let password = password.as_deref().unwrap_or("");
+                println!(
+                    "  Using password: {}",
+                    if password.is_empty() {
+                        "<empty>"
+                    } else {
+                        "<provided>"
+                    }
+                );
+
+                let pfx = PFX::parse(&pfx_data)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse PKCS12 file: {:?}", e))?;
+
+                // Extract the key and certificate
+                let bags = pfx.bags(password).map_err(|e| {
+                    anyhow::anyhow!("Failed to decrypt PKCS12 (wrong password?): {:?}", e)
+                })?;
+
+                println!("\n✓ Successfully parsed PKCS12 file\n");
+                println!("Total bags found: {}\n", bags.len());
+
+                // Try to find and display keys and certificates
+                for (i, bag) in bags.iter().enumerate() {
+                    println!("  Bag #{}:", i + 1);
+
+                    // Try to get friendly name from attributes
+                    for attr in &bag.attributes {
+                        // Check the debug format to see what we have
+                        let attr_str = format!("{:?}", attr);
+                        if attr_str.contains("FriendlyName") {
+                            println!("    {}", attr_str);
+                        }
+                    }
+
+                    // Display bag type
+                    let bag_type = format!("{:?}", bag.bag);
+                    if bag_type.contains("Data") {
+                        let data_len = if let Some(start) = bag_type.find('[') {
+                            if let Some(end) = bag_type.find(']') {
+                                &bag_type[start + 1..end]
+                            } else {
+                                "unknown"
+                            }
+                        } else {
+                            "unknown"
+                        };
+                        println!("    Type: Encrypted data ({} bytes)", data_len);
+                    } else {
+                        println!(
+                            "    Type: {}",
+                            bag_type.split('(').next().unwrap_or(&bag_type)
+                        );
+                    }
+
+                    println!();
+                }
+
+                println!("\nNote: Use openssl to extract keys and certificates:");
+                println!(
+                    "  openssl pkcs12 -in {} -nodes -out output.pem",
+                    file.display()
+                );
+                println!(
+                    "  openssl pkcs12 -in {} -nocerts -nodes -out key.pem",
+                    file.display()
+                );
+                println!(
+                    "  openssl pkcs12 -in {} -nokeys -out cert.pem",
+                    file.display()
+                );
+
+                Ok(())
+            }
+            DebugCommands::ParseSignIn {
+                xml,
+                key_path,
+                server_key,
+            } => {
+                println!("Parsing Adobe ADEPT signIn XML...");
+                println!("  XML file: {}", xml.display());
+
+                // Parse the signIn XML
+                let signin_data = parse_signin_xml(&xml)?;
+                println!("  ✓ Parsed signIn XML");
+
+                // Display basic info
+                println!("\nSignIn Information:");
+                println!("  Method: {}", signin_data.method);
+                println!(
+                    "  SignIn data (encrypted): {} bytes",
+                    signin_data.sign_in_data_encrypted.len()
+                );
+                println!("    Note: Encrypted with Adobe activation server's public key");
+                println!(
+                    "  Public auth key: {} bits",
+                    signin_data.public_auth_key.size() * 8
+                );
+                println!(
+                    "  Encrypted private auth key: {} bytes",
+                    signin_data.encrypted_private_auth_key.len()
+                );
+                println!("    Note: Encrypted with device key");
+                println!(
+                    "  Public license key: {} bits",
+                    signin_data.public_license_key.size() * 8
+                );
+                println!(
+                    "  Encrypted private license key: {} bytes",
+                    signin_data.encrypted_private_license_key.len()
+                );
+                println!("    Note: Encrypted with device key");
+
+                // If server key is provided, try to decrypt signInData
+                if let Some(server_key_path) = server_key {
+                    println!(
+                        "\n  Loading Adobe server key from {}...",
+                        server_key_path.display()
+                    );
+                    let server_key_bytes = fs::read(&server_key_path).with_context(|| {
+                        format!("Failed to read server key file: {:?}", server_key_path)
+                    })?;
+                    let server_key = rsa::RsaPrivateKey::from_pkcs1_der(&server_key_bytes)
+                        .or_else(|_| {
+                            rsa::pkcs8::DecodePrivateKey::from_pkcs8_der(&server_key_bytes)
+                        })
+                        .context("Failed to parse server key")?;
+                    println!("  ✓ Loaded server key ({} bits)", server_key.size() * 8);
+                }
+                let device_key = adeptkeys()?.device_key;
+                let iv: Vec<_> = signin_data.encrypted_private_auth_key[..16].into();
+                let cipher: Vec<_> = signin_data.encrypted_private_auth_key[16..].into();
+                let auth_key = decrypt_private_key_with_iv(&cipher, &device_key, &iv)?;
+                println!("RSA Auth key: {:?}", auth_key);
+
+                let license_key_iv: Vec<_> = signin_data.encrypted_private_license_key[..16].into();
+                let license_key_cipher: Vec<_> =
+                    signin_data.encrypted_private_license_key[16..].into();
+                let license_key =
+                    decrypt_private_key_with_iv(&license_key_cipher, &device_key, &license_key_iv)?;
+                println!("RSA License key: {:?}", license_key);
 
                 Ok(())
             }
