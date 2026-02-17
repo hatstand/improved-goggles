@@ -21,7 +21,7 @@ mod safe_strings;
 mod acsm;
 
 // Re-export public API
-pub use acsm::{parse_acsm, AcsmInfo};
+pub use acsm::{parse_acsm, AcsmInfo, AcsmMetadata};
 #[cfg(windows)]
 pub use adept_keys::{adept_device, adept_fingerprint, adept_user, adeptkeys, AdeptKey};
 
