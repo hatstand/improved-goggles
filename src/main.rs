@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::debug;
-use rmpub::{decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key};
+use rmpub::{
+    decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key, parse_acsm,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -48,6 +50,19 @@ enum Commands {
         input: PathBuf,
 
         /// Path for the decrypted output EPUB file
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
+    },
+    /// Fetch an encrypted EPUB from an operator based on an ACSM file
+    FetchEpub {
+        /// Path to the ACSM file
+        acsm: PathBuf,
+
+        /// Output file path for the downloaded EPUB
         #[arg(short, long)]
         output: PathBuf,
 
@@ -198,6 +213,19 @@ fn main() -> Result<()> {
             println!("✓ Successfully decrypted EPUB");
             println!("  Decrypted {} files", decrypted_count);
             println!("  Output: {}", output.display());
+
+            Ok(())
+        }
+        Commands::FetchEpub { acsm, output, key } => {
+            println!("Fetching EPUB from ACSM file...");
+            println!("  ACSM: {}", acsm.display());
+            println!("  Output: {}", output.display());
+
+            // Parse the ACSM file
+            println!("  Parsing ACSM file...");
+            let acsm_info = parse_acsm(&acsm)?;
+
+            println!("  ACSM: {:?}", acsm_info);
 
             Ok(())
         }
