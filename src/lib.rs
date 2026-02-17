@@ -166,6 +166,154 @@ fn decompress_deflate(data: &[u8]) -> Result<Vec<u8>> {
     Ok(decompressed)
 }
 
+/// Extracts the list of encrypted file paths from META-INF/encryption.xml
+pub fn list_encrypted_files<P: AsRef<Path>>(epub_path: P) -> Result<Vec<String>> {
+    // Open the EPUB file (which is a ZIP archive)
+    let file = File::open(epub_path.as_ref())
+        .with_context(|| format!("Failed to open EPUB file: {:?}", epub_path.as_ref()))?;
+    let reader = BufReader::new(file);
+    let mut archive = ZipArchive::new(reader).context("Failed to read EPUB as ZIP archive")?;
+
+    // Try to extract META-INF/encryption.xml
+    let mut encryption_file = match archive.by_name("META-INF/encryption.xml") {
+        Ok(f) => f,
+        Err(_) => {
+            // No encryption.xml means no encrypted files
+            return Ok(Vec::new());
+        }
+    };
+
+    // Read the XML content
+    let mut xml_content = String::new();
+    encryption_file
+        .read_to_string(&mut xml_content)
+        .context("Failed to read encryption.xml")?;
+
+    // Parse XML and find all CipherReference URIs
+    let doc = roxmltree::Document::parse(&xml_content).context("Failed to parse encryption.xml")?;
+
+    let encrypted_files: Vec<String> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("CipherReference"))
+        .filter_map(|n| n.attribute("URI"))
+        .map(|s| s.to_string())
+        .collect();
+
+    Ok(encrypted_files)
+}
+
+/// Decrypts an entire EPUB and writes a new unencrypted EPUB file.
+///
+/// # Arguments
+/// * `input_path` - Path to the encrypted EPUB file
+/// * `output_path` - Path where the decrypted EPUB will be written
+/// * `rsa_key` - The RSA private key to decrypt the content key
+///
+/// # Returns
+/// Number of files decrypted
+pub fn decrypt_epub<P: AsRef<Path>, Q: AsRef<Path>>(
+    input_path: P,
+    output_path: Q,
+    rsa_key: &RsaPrivateKey,
+) -> Result<usize> {
+    use std::io::Write;
+    use zip::write::{SimpleFileOptions, ZipWriter};
+
+    // Extract the encrypted content key from the EPUB
+    let encrypted_content_key = extract_content_key(&input_path)?;
+
+    // Decrypt the content key using RSA
+    let content_key = decrypt_content_key(&encrypted_content_key, rsa_key)?;
+
+    // Get list of encrypted files
+    let encrypted_files = list_encrypted_files(&input_path)?;
+    let encrypted_set: std::collections::HashSet<String> =
+        encrypted_files.iter().cloned().collect();
+
+    // Open input EPUB
+    let input_file = File::open(input_path.as_ref())
+        .with_context(|| format!("Failed to open input EPUB: {:?}", input_path.as_ref()))?;
+    let reader = BufReader::new(input_file);
+    let mut input_archive =
+        ZipArchive::new(reader).context("Failed to read input EPUB as ZIP archive")?;
+
+    // Create output EPUB
+    let output_file = File::create(output_path.as_ref())
+        .with_context(|| format!("Failed to create output EPUB: {:?}", output_path.as_ref()))?;
+    let mut output_archive = ZipWriter::new(output_file);
+
+    let options: SimpleFileOptions =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    let mut decrypted_count = 0;
+
+    // Process all files in the EPUB
+    for i in 0..input_archive.len() {
+        let mut file = input_archive.by_index(i)?;
+        let name = file.name().to_string();
+
+        // Skip DRM-related metadata files
+        if name == "META-INF/rights.xml" || name == "META-INF/encryption.xml" {
+            continue;
+        }
+
+        // Check if file is encrypted
+        if encrypted_set.contains(&name) {
+            // Read encrypted data
+            let mut encrypted_data = Vec::new();
+            file.read_to_end(&mut encrypted_data)?;
+            drop(file);
+
+            // Decrypt the file
+            if encrypted_data.len() < 16 {
+                bail!("Encrypted file '{}' too short", name);
+            }
+
+            let iv = &encrypted_data[..16];
+            let ciphertext = &encrypted_data[16..];
+
+            // Ensure key is 16 bytes (AES-128)
+            if content_key.len() != 16 {
+                bail!(
+                    "Content key must be 16 bytes for AES-128, got {}",
+                    content_key.len()
+                );
+            }
+
+            // Create AES-128-CBC cipher
+            let cipher = Aes128CbcDec::new((&content_key[..16]).into(), iv.into());
+
+            // Decrypt the content
+            let mut decrypted = ciphertext.to_vec();
+            let decrypted_data = cipher
+                .decrypt_padded_mut::<cbc::cipher::block_padding::Pkcs7>(&mut decrypted)
+                .map_err(|e| anyhow!("Failed to decrypt file '{}': {:?}", name, e))?;
+
+            // Decompress
+            let decompressed = decompress_deflate(decrypted_data)
+                .with_context(|| format!("Failed to decompress file '{}'", name))?;
+
+            // Write decrypted file to output
+            output_archive.start_file(&name, options)?;
+            output_archive.write_all(&decompressed)?;
+
+            decrypted_count += 1;
+        } else {
+            // Copy unencrypted file as-is
+            let mut content = Vec::new();
+            file.read_to_end(&mut content)?;
+            drop(file);
+
+            output_archive.start_file(&name, options)?;
+            output_archive.write_all(&content)?;
+        }
+    }
+
+    output_archive.finish()?;
+
+    Ok(decrypted_count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
