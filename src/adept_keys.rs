@@ -12,7 +12,7 @@ use std::arch::x86_64::__cpuid;
 
 use aes::Aes128;
 use anyhow::{anyhow, bail, Context, Result};
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::Engine;
 use byteorder::{BigEndian, ByteOrder};
 use cbc::{
     cipher::{BlockDecryptMut, KeyIvInit},
@@ -261,7 +261,7 @@ fn private_license_key_from_registry_key(
         if ktype == "privateLicenseKey" {
             // Value is an AES-CBC encrypted RSA private key, base64-encoded. Decrypt it with the device key and a zero IV.
             let value = sub_subkey.get_string("value")?;
-            return decrypt_private_key_from_b64(&value, &device_key);
+            return decrypt_private_key_from_b64(&value, device_key);
         }
     }
     bail!("No privateLicenseKey found in registry");

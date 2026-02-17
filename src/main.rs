@@ -1,10 +1,9 @@
 use anyhow::{Context, Result};
-use base64::prelude::BASE64_STANDARD;
 use clap::{Parser, Subcommand};
 use jiff::Timestamp;
 use log::debug;
 use rmpub::{
-    decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key,
+    decrypt_content_key, decrypt_epub, decrypt_epub_file,
     decrypt_private_key_with_iv, extract_content_key, generate_fulfill_request,
     generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response,
     parse_signin_response, parse_signin_xml, sign_fulfill_request, verify_fulfill_request,
@@ -14,8 +13,7 @@ use std::path::PathBuf;
 
 use base64::Engine;
 use p12::PFX;
-use rsa::{pkcs1::DecodeRsaPrivateKey, RsaPrivateKey};
-use x509_parser::prelude::*;
+use rsa::pkcs1::DecodeRsaPrivateKey;
 
 #[cfg(windows)]
 use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys};
@@ -459,7 +457,7 @@ fn main() -> Result<()> {
                         value.to_str().unwrap_or("<binary>")
                     ));
                 }
-                trace_content.borrow_mut().push_str("\n");
+                trace_content.borrow_mut().push('\n');
 
                 if !status.is_success() {
                     use anyhow::bail;
@@ -521,7 +519,7 @@ fn main() -> Result<()> {
                             value.to_str().unwrap_or("<binary>")
                         ));
                     }
-                    trace_content.borrow_mut().push_str("\n");
+                    trace_content.borrow_mut().push('\n');
 
                     if !epub_status.is_success() {
                         use anyhow::bail;

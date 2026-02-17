@@ -456,13 +456,13 @@ fn hash_append_string(hasher: &mut Sha1, s: &str) {
     let len_upper = (length / 256) as u8;
     let len_lower = (length & 0xFF) as u8;
 
-    hasher.update(&[len_upper, len_lower]);
+    hasher.update([len_upper, len_lower]);
     hasher.update(bytes);
 }
 
 /// Hash a single tag byte
 fn hash_append_tag(hasher: &mut Sha1, tag: u8) {
-    hasher.update(&[tag]);
+    hasher.update([tag]);
 }
 
 /// Recursively hash an XML node using Adobe's algorithm
