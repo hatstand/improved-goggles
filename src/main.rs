@@ -156,39 +156,41 @@ enum DebugCommands {
     },
 }
 
+fn extract_key(output: PathBuf) -> Result<()> {
+    #[cfg(not(windows))]
+    {
+        use anyhow::bail;
+        _ = output; // Suppress unused variable warning
+
+        bail!("Key extraction from registry is not supported on this platform. Please use --key parameter with a pre-extracted key file.");
+    }
+
+    #[cfg(windows)]
+    {
+        println!("Extracting device key from Windows Registry...");
+
+        let key = adeptkeys()?;
+
+        // Export the RSA private key to DER format
+        let der_bytes = key.private_license_key.to_pkcs1_der()?;
+        fs::write(&output, der_bytes.as_bytes())?;
+
+        println!(
+            "✓ Successfully extracted device key to: {}",
+            output.display()
+        );
+        println!("  Key name: {}", key.name);
+        println!("  Key size: {} bits", key.private_license_key.size() * 8);
+        Ok(())
+    }
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::ExtractKey { output } => {
-            #[cfg(not(windows))]
-            {
-                use anyhow::bail;
-                _ = output; // Suppress unused variable warning
-
-                bail!("Key extraction from registry is not supported on this platform. Please use --key parameter with a pre-extracted key file.");
-            }
-
-            #[cfg(windows)]
-            {
-                println!("Extracting device key from Windows Registry...");
-
-                let key = adeptkeys()?;
-
-                // Export the RSA private key to DER format
-                let der_bytes = key.private_license_key.to_pkcs1_der()?;
-                fs::write(&output, der_bytes.as_bytes())?;
-
-                println!(
-                    "✓ Successfully extracted device key to: {}",
-                    output.display()
-                );
-                println!("  Key name: {}", key.name);
-                println!("  Key size: {} bits", key.private_license_key.size() * 8);
-                Ok(())
-            }
-        }
+        Commands::ExtractKey { output } => extract_key(output),
         Commands::DecryptFile {
             epub,
             file,
