@@ -1,0 +1,25 @@
+[package]
+name = "rmpub"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc"] }
+base64 = "0.22"
+windows-registry = "0.6.1"
+windows-strings = "0.5.1"
+log = "0.4.29"
+env_logger = "0.11.9"
+anyhow = "1.0.101"
+hex = "0.4.3"
+byteorder = "1.5.0"
+
+[dependencies.windows]
+version = "0.62.2"
+features = [
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemInformation",
+]
+
