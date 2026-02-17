@@ -14,6 +14,7 @@ use cbc::{
     Decryptor,
 };
 use flate2::read::DeflateDecoder;
+use log::debug;
 use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Encrypt, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
@@ -254,7 +255,7 @@ fn decompress_deflate(data: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn keykey() -> Result<Vec<u8>> {
-    println!("{:x}", cpu_signature());
+    debug!("CPU signature: {:x}", cpu_signature());
     let keykey_key: windows_registry::Value = CURRENT_USER.open(KEYKEY_PATH)?.get_value("key")?;
     let entropy = device_entropy()?;
     unsafe {
@@ -262,8 +263,8 @@ fn keykey() -> Result<Vec<u8>> {
             cbData: 0,
             pbData: std::ptr::null_mut(),
         };
-        println!("Decrypting key with entropy: {}", hex::encode(&entropy));
-        println!(
+        debug!("Decrypting key with entropy: {}", hex::encode(&entropy));
+        debug!(
             "Encrypted key (len={}): {}",
             keykey_key.len(),
             hex::encode(&keykey_key)
@@ -286,7 +287,7 @@ fn keykey() -> Result<Vec<u8>> {
 
         assert_ne!(out.cbData, 0, "Decrypted data should not be empty");
         let decrypted = std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec();
-        println!(
+        debug!(
             "Decrypted key (len={}): {}",
             decrypted.len(),
             hex::encode(&decrypted)
@@ -311,14 +312,14 @@ pub fn adeptkeys() -> Result<AdeptKey> {
     let aes_key_bytes = keykey()?;
 
     for subkey_name in subkey_names {
-        println!("Processing subkey: {}", subkey_name);
+        debug!("Processing subkey: {}", subkey_name);
         // Open each subkey
         let subkey = adept_key.open(&subkey_name)?;
 
         // Get the default value (type)
         let ktype = subkey.get_string("")?;
 
-        println!("Subkey: {}  Type: {}", subkey_name, ktype);
+        debug!("Subkey: {}  Type: {}", subkey_name, ktype);
 
         // We're only interested in 'credentials' keys
         if ktype == "credentials" {
@@ -329,13 +330,13 @@ pub fn adeptkeys() -> Result<AdeptKey> {
                 let sub_subkey = subkey.open(&sub_subkey_name)?;
                 let ktype2 = sub_subkey.get_string("")?;
 
-                println!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
+                debug!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
 
                 // Collect information for each credential component
                 if ktype2 == "privateLicenseKey" {
                     let value = sub_subkey.get_string("value")?;
 
-                    println!("    privateLicenseKey  value: {}", value);
+                    debug!("    privateLicenseKey value: {}", value);
 
                     let decoded = decrypt_private_key(&value, &aes_key_bytes)?;
                     return Ok(AdeptKey {
@@ -368,7 +369,7 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey>
     // Create cipher
     let cipher = Aes128CbcDec::new(&aes_key.into(), &iv.into());
 
-    println!(
+    debug!(
         "Decrypting private key with AES-128-CBC. Encrypted data length: {} bytes",
         encrypted.len()
     );
@@ -379,7 +380,7 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey>
         .decrypt_padded_mut::<cbc::cipher::block_padding::NoPadding>(&mut decrypted)
         .map_err(|e| anyhow!("AES decryption failed: {:?}", e))?;
 
-    println!(
+    debug!(
         "Decrypted data (len={}): {}",
         decrypted_data.len(),
         hex::encode(decrypted_data)
@@ -395,7 +396,7 @@ fn decrypt_private_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey>
     // Parse the DER-encoded RSA private key (this creates an owned RsaPrivateKey)
     let der_bytes = &unpadded[26..];
 
-    println!(
+    debug!(
         "DER-encoded RSA private key (len={}): {}",
         der_bytes.len(),
         hex::encode(der_bytes)

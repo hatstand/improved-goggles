@@ -1,6 +1,8 @@
 #[cfg(windows)]
 use clap::{Parser, Subcommand};
 #[cfg(windows)]
+use log::debug;
+#[cfg(windows)]
 use rmpub::{adeptkeys, decrypt_content_key, decrypt_epub_file, extract_content_key};
 #[cfg(windows)]
 use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
@@ -97,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let rsa_key = if let Some(key_path) = key {
                     use rsa::pkcs1::DecodeRsaPrivateKey;
 
-                    println!("  Using key from: {}", key_path.display());
+                    debug!("Using key from: {}", key_path.display());
                     let der_bytes = fs::read(key_path)?;
                     rsa::RsaPrivateKey::from_pkcs1_der(&der_bytes)?
                 } else {
@@ -114,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Decrypt the content key using RSA
                 println!("  Decrypting content key...");
                 let content_key = decrypt_content_key(&encrypted_content_key, &rsa_key)?;
-                println!("  Content key: {}", hex::encode(&content_key));
+                debug!("Content key: {}", hex::encode(&content_key));
 
                 // Decrypt the specific file
                 println!("  Decrypting file content...");
