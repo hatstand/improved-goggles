@@ -185,6 +185,79 @@ fn extract_key(output: PathBuf) -> Result<()> {
     }
 }
 
+fn decrypt_file(
+    epub: PathBuf,
+    file: &str,
+    output: Option<PathBuf>,
+    key: Option<PathBuf>,
+) -> Result<()> {
+    // Determine output path: use provided or extract filename from file path
+    let output_path = if let Some(out) = output {
+        out
+    } else {
+        // Extract just the filename from the file path
+        let filename = std::path::Path::new(&file)
+            .file_name()
+            .context("Invalid file path")?
+            .to_string_lossy()
+            .to_string();
+        PathBuf::from(filename)
+    };
+
+    println!("Decrypting file from EPUB...");
+    println!("  EPUB: {}", epub.display());
+    println!("  File: {}", file);
+    println!("  Output: {}", output_path.display());
+
+    // Get the RSA private key
+    let rsa_key = if let Some(key_path) = key {
+        use rsa::pkcs1::DecodeRsaPrivateKey;
+
+        debug!("Using key from: {}", key_path.display());
+        let der_bytes = fs::read(key_path)?;
+        rsa::RsaPrivateKey::from_pkcs1_der(&der_bytes)?
+    } else {
+        #[cfg(windows)]
+        {
+            println!("  Extracting key from registry...");
+            let key = adeptkeys()?;
+            println!("  Using key: {}", key.name);
+            key.private_license_key.clone()
+        }
+
+        #[cfg(not(windows))]
+        {
+            eprintln!("Error: Key extraction from registry is only available on Windows.");
+            eprintln!("Please use --key parameter with a pre-extracted key file.");
+            std::process::exit(1);
+        }
+    };
+
+    // Extract the encrypted content key from the EPUB
+    println!("  Extracting content key from EPUB...");
+    let encrypted_content_key = extract_content_key(&epub)?;
+
+    // Decrypt the content key using RSA
+    println!("  Decrypting content key...");
+    let content_key = decrypt_content_key(&encrypted_content_key, &rsa_key)?;
+    debug!("Content key: {}", hex::encode(&content_key));
+
+    // Decrypt the specific file
+    println!("  Decrypting file content...");
+    let decrypted_content = decrypt_epub_file(&epub, &file, &content_key)?;
+
+    // Write to output
+    fs::write(&output_path, &decrypted_content)?;
+
+    println!(
+        "✓ Successfully decrypted file ({} bytes)",
+        decrypted_content.len()
+    );
+    println!("  Saved to: {}", output_path.display());
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
@@ -196,73 +269,7 @@ fn main() -> Result<()> {
             file,
             output,
             key,
-        } => {
-            // Determine output path: use provided or extract filename from file path
-            let output_path = if let Some(out) = output {
-                out
-            } else {
-                // Extract just the filename from the file path
-                let filename = std::path::Path::new(&file)
-                    .file_name()
-                    .context("Invalid file path")?
-                    .to_string_lossy()
-                    .to_string();
-                PathBuf::from(filename)
-            };
-
-            println!("Decrypting file from EPUB...");
-            println!("  EPUB: {}", epub.display());
-            println!("  File: {}", file);
-            println!("  Output: {}", output_path.display());
-
-            // Get the RSA private key
-            let rsa_key = if let Some(key_path) = key {
-                use rsa::pkcs1::DecodeRsaPrivateKey;
-
-                debug!("Using key from: {}", key_path.display());
-                let der_bytes = fs::read(key_path)?;
-                rsa::RsaPrivateKey::from_pkcs1_der(&der_bytes)?
-            } else {
-                #[cfg(windows)]
-                {
-                    println!("  Extracting key from registry...");
-                    let key = adeptkeys()?;
-                    println!("  Using key: {}", key.name);
-                    key.private_license_key.clone()
-                }
-
-                #[cfg(not(windows))]
-                {
-                    eprintln!("Error: Key extraction from registry is only available on Windows.");
-                    eprintln!("Please use --key parameter with a pre-extracted key file.");
-                    std::process::exit(1);
-                }
-            };
-
-            // Extract the encrypted content key from the EPUB
-            println!("  Extracting content key from EPUB...");
-            let encrypted_content_key = extract_content_key(&epub)?;
-
-            // Decrypt the content key using RSA
-            println!("  Decrypting content key...");
-            let content_key = decrypt_content_key(&encrypted_content_key, &rsa_key)?;
-            debug!("Content key: {}", hex::encode(&content_key));
-
-            // Decrypt the specific file
-            println!("  Decrypting file content...");
-            let decrypted_content = decrypt_epub_file(&epub, &file, &content_key)?;
-
-            // Write to output
-            fs::write(&output_path, &decrypted_content)?;
-
-            println!(
-                "✓ Successfully decrypted file ({} bytes)",
-                decrypted_content.len()
-            );
-            println!("  Saved to: {}", output_path.display());
-
-            Ok(())
-        }
+        } => decrypt_file(epub, &file, output, key),
         Commands::DecryptEpub { input, output, key } => {
             println!("Decrypting entire EPUB...");
             println!("  Input: {}", input.display());
