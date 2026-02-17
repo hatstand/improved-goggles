@@ -1,9 +1,14 @@
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::debug;
-use rmpub::{adeptkeys, decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key};
-use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
+use rmpub::{decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key};
 use std::fs;
 use std::path::PathBuf;
+
+#[cfg(windows)]
+use rmpub::adeptkeys;
+#[cfg(windows)]
+use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts};
 
 #[derive(Parser)]
 #[command(name = "rmpub")]
@@ -52,7 +57,7 @@ enum Commands {
     },
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
@@ -60,8 +65,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::ExtractKey { output } => {
             #[cfg(not(windows))]
             {
-                eprintln!("Error: extract-key command is only available on Windows.");
-                std::process::exit(1);
+                use anyhow::bail;
+                _ = output; // Suppress unused variable warning
+
+                bail!("Key extraction from registry is not supported on this platform. Please use --key parameter with a pre-extracted key file.");
             }
 
             #[cfg(windows)]
@@ -80,8 +87,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 println!("  Key name: {}", key.name);
                 println!("  Key size: {} bits", key.key.size() * 8);
+                Ok(())
             }
-            Ok(())
         }
         Commands::DecryptFile {
             epub,
@@ -96,7 +103,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Extract just the filename from the file path
                 let filename = std::path::Path::new(&file)
                     .file_name()
-                    .ok_or("Invalid file path")?
+                    .context("Invalid file path")?
                     .to_string_lossy()
                     .to_string();
                 PathBuf::from(filename)
