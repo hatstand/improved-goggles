@@ -20,6 +20,7 @@ mod safe_strings;
 
 mod acsm;
 mod activation;
+mod adobe_hash;
 
 // Re-export public API
 pub use acsm::{
