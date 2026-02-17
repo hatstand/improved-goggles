@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use log::debug;
 use rmpub::{
     decrypt_content_key, decrypt_epub, decrypt_epub_file, extract_content_key,
-    generate_fulfill_request, parse_acsm, sign_fulfill_request,
+    generate_fulfill_request, generate_fulfill_request_minified, parse_acsm, sign_fulfill_request,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -289,18 +289,81 @@ fn main() -> Result<()> {
                 let fingerprint_val = adept_fingerprint()?;
                 println!("  ✓ Got user, device, and fingerprint");
 
-                // Generate the fulfill request
+                // Extract device key for signing
+                println!("  Extracting device key from registry...");
+                let key = adeptkeys()?;
+                println!("  ✓ Got device key");
+
+                // Generate the minified fulfill request
                 println!("  Generating fulfillment request...");
-                let fulfill_xml =
-                    generate_fulfill_request(&acsm_info, &user_val, &device_val, &fingerprint_val);
-                println!("  ✓ Generated fulfill request");
+                let fulfill_xml = generate_fulfill_request_minified(
+                    &acsm_info,
+                    &user_val,
+                    &device_val,
+                    &fingerprint_val,
+                );
+
+                // Sign the request
+                println!("  Signing fulfillment request...");
+                let signature = sign_fulfill_request(&fulfill_xml, &key.key)?;
+                println!("  ✓ Signed fulfill request");
+
+                // Add signature to complete the XML
+                let complete_xml = format!(
+                    "{}<adept:signature>{}</adept:signature></adept:fulfill>",
+                    &fulfill_xml[..fulfill_xml.len() - 16], // Remove </adept:fulfill>
+                    signature
+                );
 
                 // Print the fulfillment request
-                println!("\n--- Fulfillment Request ---");
-                println!("{}", fulfill_xml);
+                println!("\n--- Fulfillment Request (first 500 chars) ---");
+                println!(
+                    "{}{}",
+                    &complete_xml.chars().take(500).collect::<String>(),
+                    if complete_xml.len() > 500 { "..." } else { "" }
+                );
                 println!("--- End Fulfillment Request ---\n");
 
-                println!("  ACSM: {:?}", acsm_info);
+                // Make HTTP POST request to operator URL
+                println!(
+                    "  Sending fulfillment request to {}...",
+                    acsm_info.operator_url
+                );
+                let client = reqwest::blocking::Client::builder()
+                    .danger_accept_invalid_certs(true) // Accept invalid certificates
+                    .build()?;
+
+                let response = client
+                    .post(&acsm_info.operator_url)
+                    .header("Accept", "*/*")
+                    .header("Content-Type", "application/vnd.adobe.adept+xml")
+                    .header("User-Agent", "book2png")
+                    .body(complete_xml)
+                    .send()
+                    .with_context(|| {
+                        format!("Failed to send request to {}", acsm_info.operator_url)
+                    })?;
+
+                let status = response.status();
+                println!("  Response status: {}", status);
+
+                if !status.is_success() {
+                    use anyhow::bail;
+                    let response_text = response.text().unwrap_or_default();
+                    bail!(
+                        "Fulfillment request failed with status {}: {}",
+                        status,
+                        response_text
+                    );
+                }
+
+                // Save response to output file
+                let response_bytes = response.bytes()?;
+                fs::write(&output, &response_bytes)?;
+
+                println!("✓ Successfully downloaded EPUB fulfilment");
+                println!("  Saved to: {}", output.display());
+                println!("  Size: {} bytes", response_bytes.len());
 
                 Ok(())
             }

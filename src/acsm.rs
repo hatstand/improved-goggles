@@ -365,6 +365,51 @@ pub fn generate_fulfill_request(
     result
 }
 
+/// Generates a minified fulfill request XML for HTTP transmission
+///
+/// This version removes whitespace between elements except for the fulfillmentToken
+/// content which preserves its original formatting to maintain the HMAC.
+///
+/// # Arguments
+/// * `acsm_info` - Parsed ACSM information (includes raw fulfillmentToken XML)
+/// * `user` - User GUID (e.g., "urn:uuid:54f2e5c9-0071-46e4-8452-df4f7fe0cc3f")
+/// * `device` - Device GUID (e.g., "urn:uuid:a69fd2ee-8b78-4410-a1a1-8c782e379fb7")
+/// * `fingerprint` - Device fingerprint (base64-encoded)
+///
+/// # Returns
+/// Minified XML string for HTTP POST
+pub fn generate_fulfill_request_minified(
+    acsm_info: &AcsmInfo,
+    user: &str,
+    device: &str,
+    fingerprint: &str,
+) -> String {
+    let mut result = String::from("<?xml version=\"1.0\"?>");
+    result.push_str("<adept:fulfill xmlns:adept=\"http://ns.adobe.com/adept\">");
+
+    // Add user, device, deviceType (minified)
+    result.push_str(&format!("<adept:user>{}</adept:user>", user));
+    result.push_str(&format!("<adept:device>{}</adept:device>", device));
+    result.push_str("<adept:deviceType>standalone</adept:deviceType>");
+
+    // Add the raw fulfillmentToken XML (preserve original formatting)
+    result.push_str(&acsm_info.fulfillment_token_xml);
+
+    // Add targetDevice (minified)
+    let target_device = generate_target_device(user, device, fingerprint);
+    // Remove all newlines and extra spaces from targetDevice
+    let minified_target = target_device
+        .lines()
+        .map(|line| line.trim())
+        .collect::<Vec<_>>()
+        .join("");
+    result.push_str(&minified_target);
+
+    result.push_str("</adept:fulfill>");
+
+    result
+}
+
 // ASN.1-like tags used by Adobe's XML hashing algorithm
 const ASN_NS_TAG: u8 = 1; // BEGIN_ELEMENT
 const ASN_CHILD: u8 = 2; // END_ATTRIBUTES
@@ -665,5 +710,46 @@ mod tests {
         // Verify against expected hash
         // Based on https://github.com/Leseratte10/acsm-calibre-plugin/blob/fb288afb3a83156f0e534eb1e0ec1cbc45a3e675/calibre-plugin/libadobe.py#L573
         assert_eq!(hash_hex, "1d1598745cd4a52ff1942d876b3dce13d2e823e7");
+    }
+
+    #[test]
+    fn test_generate_fulfill_request_minified() {
+        let user = "urn:uuid:54f2e5c9-0071-46e4-8452-df4f7fe0cc3f";
+        let device = "urn:uuid:a69fd2ee-8b78-4410-a1a1-8c782e379fb7";
+        let fingerprint = "poA5CcMwBNV9SFY8wyoVPCPhkI4=";
+
+        // Parse the test ACSM file
+        let acsm_info =
+            parse_acsm("src/testdata/URLLink.acsm").expect("Failed to parse test ACSM file");
+
+        let xml = generate_fulfill_request_minified(&acsm_info, user, device, fingerprint);
+
+        // Verify structure
+        assert!(xml.starts_with("<?xml version=\"1.0\"?>"));
+        assert!(xml.contains("<adept:fulfill xmlns:adept=\"http://ns.adobe.com/adept\">"));
+        assert!(xml.contains(&format!("<adept:user>{}</adept:user>", user)));
+        assert!(xml.contains(&format!("<adept:device>{}</adept:device>", device)));
+        assert!(xml.contains("<adept:deviceType>standalone</adept:deviceType>"));
+
+        // Verify fulfillmentToken preserves formatting (has newlines)
+        assert!(xml.contains("<fulfillmentToken"));
+        assert!(xml.contains("\n  <distributor>"));
+
+        // Verify targetDevice is minified (no newlines between its elements)
+        let target_start = xml
+            .find("<adept:targetDevice>")
+            .expect("targetDevice not found");
+        let target_end = xml
+            .find("</adept:targetDevice>")
+            .expect("targetDevice end not found");
+        let target_section = &xml[target_start..target_end + 21];
+        // Should not have newlines within targetDevice elements (they're minified)
+        assert!(
+            !target_section.contains("\n"),
+            "targetDevice should be minified"
+        );
+
+        // Verify it ends correctly
+        assert!(xml.ends_with("</adept:fulfill>"));
     }
 }
