@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
@@ -15,11 +13,27 @@ use flate2::read::DeflateDecoder;
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey};
 use zip::ZipArchive;
 
+#[cfg(windows)]
 mod adept_keys;
+#[cfg(windows)]
 mod safe_strings;
 
 // Re-export public API
+#[cfg(windows)]
 pub use adept_keys::{adeptkeys, AdeptKey};
+
+// Non-Windows stub
+#[cfg(not(windows))]
+#[derive(Debug)]
+pub struct AdeptKey {
+    pub key: RsaPrivateKey,
+    pub name: String,
+}
+
+#[cfg(not(windows))]
+pub fn adeptkeys() -> Result<AdeptKey> {
+    bail!("adeptkeys() is only available on Windows. This function requires access to the Windows Registry.")
+}
 
 type Aes128CbcDec = Decryptor<Aes128>;
 

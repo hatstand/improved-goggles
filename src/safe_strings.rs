@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 use windows_strings::PCWSTR;
 use windows_strings::PWSTR;
 

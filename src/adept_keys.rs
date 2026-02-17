@@ -1,3 +1,5 @@
+#![cfg(windows)]
+
 //! Adobe ADEPT DRM RSA key extraction from Windows Registry.
 //!
 //! This module handles extracting and decrypting Adobe ADEPT activation keys

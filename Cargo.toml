@@ -16,11 +16,13 @@ hex = "0.4.3"
 log = "0.4.29"
 roxmltree = "0.21.1"
 rsa = "0.9.10"
-windows-registry = "0.6.1"
-windows-strings = "0.5.1"
 zip = "8.1.0"
 
-[dependencies.windows]
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6.1"
+windows-strings = "0.5.1"
+
+[target.'cfg(windows)'.dependencies.windows]
 version = "0.62.2"
 features = [
     "Win32_Security_Cryptography",
