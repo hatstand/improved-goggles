@@ -1,0 +1,27 @@
+name: Rust
+
+on:
+    push:
+        branches: [main]
+
+env:
+    CARGO_TERM_COLOR: always
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+        - uses: actions-rust-lang/setup-rust-toolchain@v1
+        - name: Install Windows toolchain
+          run: rustup target add x86_64-pc-windows-gnu
+        - name: Install clippy
+          run: rustup component add clippy
+        - name: Install mingw-w64 toolchain
+          run: sudo apt install binutils-mingw-w64-x86-64 gcc-mingw-w64 nsis
+        - uses: actions/checkout@v4
+        - name: Run clippy
+          run: cargo clippy
+        - name: Build for Windows
+          run: cargo build --release --target x86_64-pc-windows-gnu
+        - name: Build for Linux
+          run: cargo build --release --target x86_64-unknown-linux-gnu
