@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
@@ -21,6 +22,9 @@ mod safe_strings;
 mod acsm;
 mod activation;
 mod adobe_hash;
+#[cfg(windows)]
+mod fetch;
+mod keys;
 mod rsa;
 
 // Re-export public API
@@ -31,15 +35,17 @@ pub use acsm::{
 };
 pub use activation::{parse_signin_response, parse_signin_xml, SignInData, SignInResponse};
 #[cfg(windows)]
-pub use adept_keys::{
-    adept_device, adept_fingerprint, adept_user, adeptkeys, decrypt_private_key_with_iv, AdeptKey,
-};
+pub use adept_keys::{adept_device, adept_fingerprint, adept_user, adeptkeys};
+#[cfg(windows)]
+pub use fetch::fetch_epub;
+pub use keys::load_keys;
+pub use rsa::{decrypt_private_key_with_iv, StorableRsaPrivateKey};
 
-// Non-Windows stub
-#[cfg(not(windows))]
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AdeptKey {
-    pub key: RsaPrivateKey,
+    pub device_key: Vec<u8>,
+    pub private_license_key: StorableRsaPrivateKey,
+    pub private_auth_key: StorableRsaPrivateKey,
     pub name: String,
 }
 

@@ -10,59 +10,25 @@
 
 use std::arch::x86_64::__cpuid;
 
-use aes::Aes128;
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use base64::Engine;
 use byteorder::{BigEndian, ByteOrder};
-use cbc::{
-    cipher::{BlockDecryptMut, KeyIvInit},
-    Decryptor,
-};
 use log::debug;
 use p12_keystore::KeyStoreEntry;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
-use serde::{Deserialize, Serialize};
+use rsa::{pkcs8::DecodePrivateKey, RsaPrivateKey};
 use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
 use windows_registry::CURRENT_USER;
 
-use crate::{rsa::StorableRsaPrivateKey, safe_strings};
-
-type Aes128CbcDec = Decryptor<Aes128>;
+use crate::AdeptKey;
+use crate::{
+    rsa::{decrypt_private_license_key, StorableRsaPrivateKey},
+    safe_strings,
+};
 
 const DEVICE_KEY_PATH: &str = r"Software\Adobe\Adept\Device";
 const ADEPT_PATH: &str = r"Software\Adobe\Adept\Activation";
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AdeptKey {
-    pub device_key: Vec<u8>,
-    pub private_license_key: StorableRsaPrivateKey,
-    pub private_auth_key: StorableRsaPrivateKey,
-    pub name: String,
-}
-
-/// PKCS#7 unpadding
-fn unpad(data: &[u8]) -> Result<Vec<u8>> {
-    if data.is_empty() {
-        bail!("Empty data for unpadding");
-    }
-
-    let padding_len = data[data.len() - 1] as usize;
-
-    if padding_len == 0 || padding_len > 16 || padding_len > data.len() {
-        bail!("Invalid padding length: {}", padding_len);
-    }
-
-    // Verify all padding bytes are correct
-    for i in 0..padding_len {
-        if data[data.len() - 1 - i] != padding_len as u8 {
-            bail!("Invalid padding bytes");
-        }
-    }
-
-    Ok(data[..data.len() - padding_len].to_vec())
-}
 
 fn system_directory() -> Result<String> {
     unsafe {
@@ -431,66 +397,4 @@ pub fn adept_fingerprint() -> Result<String> {
         }
     }
     bail!("No fingerprint found in registry");
-}
-
-pub fn decrypt_private_key_with_iv(
-    encrypted: &[u8],
-    key: &[u8],
-    iv: &[u8],
-) -> Result<RsaPrivateKey> {
-    // Ensure key is 16 bytes (128-bit AES)
-    let mut aes_key = [0u8; 16];
-    let key_len = std::cmp::min(key.len(), 16);
-    aes_key[..key_len].copy_from_slice(&key[..key_len]);
-
-    // Create cipher
-    let cipher = Aes128CbcDec::new(&aes_key.into(), iv.into());
-
-    debug!(
-        "Decrypting private key with AES-128-CBC. Encrypted data length: {} bytes",
-        encrypted.len()
-    );
-
-    // Decrypt
-    let mut decrypted = encrypted.to_vec();
-    let decrypted_data = cipher
-        .decrypt_padded_mut::<cbc::cipher::block_padding::NoPadding>(&mut decrypted)
-        .map_err(|e| anyhow!("AES decryption failed: {:?}", e))?;
-
-    debug!(
-        "Decrypted data (len={}): {}",
-        decrypted_data.len(),
-        hex::encode(decrypted_data)
-    );
-
-    let unpadded = unpad(decrypted_data)?;
-
-    // Skip first 26 bytes as per the Python code
-    if unpadded.len() < 26 {
-        bail!("Decrypted data too short");
-    }
-
-    // Parse the DER-encoded RSA private key (this creates an owned RsaPrivateKey)
-    let der_bytes = &unpadded[26..];
-
-    debug!(
-        "DER-encoded RSA private key (len={}): {}",
-        der_bytes.len(),
-        hex::encode(der_bytes)
-    );
-
-    RsaPrivateKey::from_pkcs1_der(der_bytes)
-        .context("Failed to parse RSA private key from decrypted data")
-}
-
-/// Decrypt the private license key using AES-CBC
-/// Returns the parsed RSA private key.
-pub fn decrypt_private_license_key(encrypted_b64: &str, key: &[u8]) -> Result<RsaPrivateKey> {
-    // Decode base64
-    let encrypted = base64::prelude::BASE64_STANDARD
-        .decode(encrypted_b64)
-        .context("Failed to decode base64")?;
-    let iv = [0u8; 16];
-
-    decrypt_private_key_with_iv(&encrypted, key, &iv)
 }

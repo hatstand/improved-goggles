@@ -1,12 +1,10 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use jiff::Timestamp;
 use log::debug;
 use rmpub::{
     decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key_with_iv,
-    extract_content_key, generate_fulfill_request_minified, parse_acsm, parse_fulfillment_response,
-    parse_signin_response, parse_signin_xml, sign_fulfill_request, verify_fulfill_request,
-    AdeptKey,
+    extract_content_key, load_keys, parse_signin_response, parse_signin_xml,
+    verify_fulfill_request, AdeptKey,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -16,8 +14,7 @@ use p12::PFX;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 
 #[cfg(windows)]
-use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys};
-#[cfg(windows)]
+use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys, fetch_epub};
 use rsa::traits::PublicKeyParts;
 
 #[derive(Parser)]
@@ -31,9 +28,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Extract device RSA private key from Windows Registry
-    ExtractKey {
+    ExtractKeys {
         /// Output file path for the private key (DER format)
-        #[arg(short, long, default_value = "adept_key.der")]
+        #[arg(short, long, default_value = "adept_keys.json")]
         output: PathBuf,
     },
     /// Decrypt a file from a DRM-protected EPUB
@@ -77,6 +74,10 @@ enum Commands {
         /// Dry run - show what would be done without making requests or writing files
         #[arg(short = 'n', long)]
         dry_run: bool,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
     },
     /// Debug commands for development and troubleshooting
     Debug {
@@ -119,11 +120,19 @@ enum DebugCommands {
         /// Path to Adobe activation server's private key (for decrypting signInData, rarely available)
         #[arg(short, long)]
         server_key: Option<PathBuf>,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
     },
     /// Parse an Adobe ADEPT signIn response (credentials) file
     ParseSignInResponse {
         /// Path to the signIn response XML file
         xml: PathBuf,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
     },
 }
 
@@ -150,29 +159,6 @@ fn extract_key(output: PathBuf) -> Result<()> {
             output.display()
         );
         Ok(())
-    }
-}
-
-fn load_keys(key_path: Option<PathBuf>) -> Result<AdeptKey> {
-    if let Some(key_path) = key_path {
-        debug!("Using keys from: {}", key_path.display());
-        let keys_bytes = fs::read(key_path)?;
-        let keys: AdeptKey = serde_json::from_slice(&keys_bytes)?;
-        Ok(keys)
-    } else {
-        #[cfg(windows)]
-        {
-            println!("  Extracting key from registry...");
-            let k = adeptkeys()?;
-            Ok(k)
-        }
-
-        #[cfg(not(windows))]
-        {
-            eprintln!("Error: Key extraction from registry is only available on Windows.");
-            eprintln!("Please use --key parameter with a pre-extracted key file.");
-            std::process::exit(1);
-        }
     }
 }
 
@@ -246,238 +232,15 @@ fn decrypt_book(input: PathBuf, output: PathBuf, key: Option<PathBuf>) -> Result
     Ok(())
 }
 
-fn fetch_epub(acsm: PathBuf, output: PathBuf, dry_run: bool) -> Result<()> {
-    if dry_run {
-        println!("[DRY RUN] Fetching EPUB from ACSM file...");
-    } else {
-        println!("Fetching EPUB from ACSM file...");
-    }
-    println!("  ACSM: {}", acsm.display());
-    println!("  Output: {}", output.display());
-
-    // Parse the ACSM file
-    println!("  Parsing ACSM file...");
-    let acsm_info = parse_acsm(&acsm)?;
-
-    // Get user, device, and fingerprint from registry
-    #[cfg(not(windows))]
-    {
-        use anyhow::bail;
-        bail!("FetchEpub requires registry access and is only available on Windows for now.");
-    }
-
-    #[cfg(windows)]
-    {
-        println!("  Extracting credentials from registry...");
-        let user_val = adept_user()?;
-        let device_val = adept_device()?;
-        let fingerprint_val = adept_fingerprint()?;
-        println!("  ✓ Got user, device, and fingerprint");
-
-        // Extract device key for signing
-        println!("  Extracting device key from registry...");
-        let key = adeptkeys()?;
-        println!("  ✓ Got device key");
-
-        // Generate the minified fulfill request
-        println!("  Generating fulfillment request...");
-        let fulfill_xml =
-            generate_fulfill_request_minified(&acsm_info, &user_val, &device_val, &fingerprint_val);
-
-        // Sign the request
-        println!("  Signing fulfillment request...");
-        let signature = sign_fulfill_request(&fulfill_xml, &key.private_auth_key)?;
-        println!("  ✓ Signed fulfill request");
-
-        // Add signature to complete the XML
-        let complete_xml = format!(
-            "{}<adept:signature>{}</adept:signature></adept:fulfill>",
-            &fulfill_xml[..fulfill_xml.len() - 16], // Remove </adept:fulfill>
-            signature
-        );
-
-        // Print the fulfillment request
-        println!("\n--- Fulfillment Request ---");
-        println!("{}", complete_xml);
-        println!("--- End Fulfillment Request ---\n");
-
-        // Create debug trace file with RFC3339 timestamp
-        let timestamp = Timestamp::now().to_string().replace(':', "-");
-        let trace_file = output.with_file_name(format!(
-            "{}.{}.trace.txt",
-            output.file_stem().unwrap().to_string_lossy(),
-            timestamp
-        ));
-        let trace_content = std::cell::RefCell::new(String::new());
-        trace_content
-            .borrow_mut()
-            .push_str("=== ADEPT Fulfillment Debug Trace ===\n\n");
-
-        // Ensure trace file is written on scope exit
-        defer::defer! {
-            if let Err(e) = fs::write(&trace_file, &*trace_content.borrow()) {
-                eprintln!("Failed to write trace file: {}", e);
-            } else {
-                println!("  Debug trace saved to: {}", trace_file.display());
-            }
-        }
-
-        // Make HTTP POST request to operator URL
-        // The fulfillment endpoint is operatorURL + "/Fulfill"
-        let fulfill_url = format!("{}/Fulfill", acsm_info.operator_url.trim_end_matches('/'));
-
-        if dry_run {
-            println!(
-                "  [DRY RUN] Would send fulfillment request to {}...",
-                fulfill_url
-            );
-        } else {
-            println!("  Sending fulfillment request to {}...", fulfill_url);
-        }
-
-        // Log request
-        trace_content.borrow_mut().push_str(&format!(
-            "--- FULFILLMENT REQUEST ---\n\
-                POST {}\n\
-                Accept: */*\n\
-                Content-Type: application/vnd.adobe.adept+xml\n\
-                User-Agent: book2png\n\
-                Content-Length: {}\n\n\
-                {}\n\n",
-            fulfill_url,
-            complete_xml.len(),
-            complete_xml
-        ));
-
-        if dry_run {
-            println!(
-                "  [DRY RUN] Would POST {} bytes to {}",
-                complete_xml.len(),
-                fulfill_url
-            );
-            println!("  [DRY RUN] Skipping actual HTTP request");
-            println!("\n✓ Dry run completed successfully");
-            println!("  No files were written");
-            println!("  No HTTP requests were made");
-            return Ok(());
-        }
-
-        let client = reqwest::blocking::Client::builder()
-            .danger_accept_invalid_certs(true) // Accept invalid certificates
-            .build()?;
-
-        let response = client
-            .post(&fulfill_url)
-            .header("Accept", "*/*")
-            .header("Content-Type", "application/vnd.adobe.adept+xml")
-            .header("User-Agent", "book2png")
-            .body(complete_xml.clone())
-            .send()
-            .with_context(|| format!("Failed to send request to {}", fulfill_url))?;
-
-        let status = response.status();
-        println!("  Response status: {}", status);
-
-        // Log response status and headers
-        trace_content.borrow_mut().push_str(&format!(
-            "--- FULFILLMENT RESPONSE ---\n\
-                Status: {}\n",
-            status
-        ));
-        for (name, value) in response.headers() {
-            trace_content.borrow_mut().push_str(&format!(
-                "{}: {}\n",
-                name,
-                value.to_str().unwrap_or("<binary>")
-            ));
-        }
-        trace_content.borrow_mut().push('\n');
-
-        if !status.is_success() {
-            use anyhow::bail;
-            let response_text = response.text().unwrap_or_default();
-            trace_content
-                .borrow_mut()
-                .push_str(&format!("{}\n\n", response_text));
-            bail!(
-                "Fulfillment request failed with status {}: {}",
-                status,
-                response_text
-            );
-        }
-
-        // Parse the fulfillment response
-        let response_text = response.text()?;
-        trace_content
-            .borrow_mut()
-            .push_str(&format!("{}\n\n", response_text));
-        println!("  ✓ Received fulfillment response");
-
-        println!("  Parsing fulfillment response...");
-        let download_urls = parse_fulfillment_response(&response_text)?;
-        println!("  ✓ Found {} download URL(s)", download_urls.len());
-
-        // Download the first EPUB file
-        if let Some(epub_url) = download_urls.first() {
-            println!("  Downloading EPUB from {}...", epub_url);
-
-            // Log EPUB download request
-            trace_content.borrow_mut().push_str(&format!(
-                "--- EPUB DOWNLOAD REQUEST ---\n\
-                    GET {}\n\
-                    Accept: */*\n\
-                    User-Agent: book2png\n\n",
-                epub_url
-            ));
-
-            let epub_response = client
-                .get(epub_url)
-                .header("Accept", "*/*")
-                .header("User-Agent", "book2png")
-                .send()
-                .with_context(|| format!("Failed to download EPUB from {}", epub_url))?;
-
-            let epub_status = epub_response.status();
-            println!("  Download status: {}", epub_status);
-
-            // Log EPUB response
-            trace_content.borrow_mut().push_str(&format!(
-                "--- EPUB DOWNLOAD RESPONSE ---\n\
-                    Status: {}\n",
-                epub_status
-            ));
-            for (name, value) in epub_response.headers() {
-                trace_content.borrow_mut().push_str(&format!(
-                    "{}: {}\n",
-                    name,
-                    value.to_str().unwrap_or("<binary>")
-                ));
-            }
-            trace_content.borrow_mut().push('\n');
-
-            if !epub_status.is_success() {
-                use anyhow::bail;
-                bail!("Failed to download EPUB: HTTP {}", epub_status);
-            }
-
-            let epub_bytes = epub_response.bytes()?;
-            trace_content.borrow_mut().push_str(&format!(
-                "Body: <binary data, {} bytes>\n\n",
-                epub_bytes.len()
-            ));
-
-            fs::write(&output, &epub_bytes)?;
-
-            println!("✓ Successfully downloaded EPUB");
-            println!("  Saved to: {}", output.display());
-            println!("  Size: {} bytes", epub_bytes.len());
-        } else {
-            use anyhow::bail;
-            bail!("No download URLs found in fulfillment response");
-        }
-
-        Ok(())
-    }
+#[cfg(not(windows))]
+fn fetch_epub(
+    _acsm: PathBuf,
+    _output: PathBuf,
+    _dry_run: bool,
+    _key: Option<PathBuf>,
+) -> Result<()> {
+    use anyhow::bail;
+    bail!("FetchEpub requires registry access and is only available on Windows for now.");
 }
 
 fn main() -> Result<()> {
@@ -485,7 +248,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::ExtractKey { output } => extract_key(output),
+        Commands::ExtractKeys { output } => extract_key(output),
         Commands::DecryptFile {
             epub,
             file,
@@ -497,7 +260,8 @@ fn main() -> Result<()> {
             acsm,
             output,
             dry_run,
-        } => fetch_epub(acsm, output, dry_run),
+            key,
+        } => fetch_epub(acsm, output, dry_run, key),
         Commands::Debug { command } => match command {
             DebugCommands::ExtractUser => {
                 #[cfg(not(windows))]
@@ -676,7 +440,11 @@ fn main() -> Result<()> {
 
                 Ok(())
             }
-            DebugCommands::ParseSignIn { xml, server_key } => {
+            DebugCommands::ParseSignIn {
+                xml,
+                server_key,
+                key,
+            } => {
                 println!("Parsing Adobe ADEPT signIn XML...");
                 println!("  XML file: {}", xml.display());
 
@@ -727,7 +495,7 @@ fn main() -> Result<()> {
                         .context("Failed to parse server key")?;
                     println!("  ✓ Loaded server key ({} bits)", server_key.size() * 8);
                 }
-                let device_key = adeptkeys()?.device_key;
+                let device_key = load_keys(key)?.device_key;
                 let iv: Vec<_> = signin_data.encrypted_private_auth_key[..16].into();
                 let cipher: Vec<_> = signin_data.encrypted_private_auth_key[16..].into();
                 let auth_key = decrypt_private_key_with_iv(&cipher, &device_key, &iv)?;
@@ -742,7 +510,7 @@ fn main() -> Result<()> {
 
                 Ok(())
             }
-            DebugCommands::ParseSignInResponse { xml } => {
+            DebugCommands::ParseSignInResponse { xml, key } => {
                 println!("Parsing signIn response from: {}", xml.display());
                 let content = std::fs::read_to_string(&xml)?;
                 let response = parse_signin_response(&content)?;
@@ -763,7 +531,7 @@ fn main() -> Result<()> {
                     response.license_certificate.len()
                 );
 
-                let device_key = adeptkeys()?.device_key;
+                let device_key = load_keys(key)?.device_key;
                 let password = base64::prelude::BASE64_STANDARD.encode(&device_key);
                 println!("Derived PKCS12 password from device key: {}", password);
 
