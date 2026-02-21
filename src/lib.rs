@@ -1,3 +1,4 @@
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufReader, Read};
@@ -263,12 +264,23 @@ pub fn decrypt_epub<P: AsRef<Path>, Q: AsRef<Path>>(
     input_path: P,
     output_path: Q,
     rsa_key: &RsaPrivateKey,
+    encrypted_key: Option<String>,
 ) -> Result<usize> {
     use std::io::Write;
     use zip::write::{SimpleFileOptions, ZipWriter};
 
-    // Extract the encrypted content key from the EPUB
-    let encrypted_content_key = extract_content_key(&input_path)?;
+    let encrypted_content_key = match encrypted_key {
+        Some(enc_key) => {
+            println!("  Using provided encrypted key for decryption");
+            debug!("Encrypted key (Base64): {}", enc_key);
+            enc_key
+        }
+        None => {
+            // Extract the encrypted content key from the EPUB
+            println!("  Extracting content key from EPUB...");
+            extract_content_key(&input_path)?
+        }
+    };
 
     // Decrypt the content key using RSA
     let content_key = decrypt_content_key(&encrypted_content_key, rsa_key)?;

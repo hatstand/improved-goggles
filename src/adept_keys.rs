@@ -207,7 +207,7 @@ fn pkcs12_from_registry_key(
             let data = base64::prelude::BASE64_STANDARD.decode(value)?;
             let password = base64::prelude::BASE64_STANDARD.encode(device_key);
             let keystore = p12_keystore::KeyStore::from_pkcs12(&data, &password)?;
-            for (name, entry) in keystore.entries() {
+            if let Some((name, entry)) = keystore.entries().next() {
                 println!("name: {} entry: {:?}", name, entry);
                 let (cert, key) = key_from_key_store_entry(entry)?;
                 return Ok((cert, key));

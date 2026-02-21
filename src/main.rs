@@ -48,6 +48,11 @@ enum Commands {
         /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
         #[arg(short, long)]
         key: Option<PathBuf>,
+
+        /// Encrypted key to use for decryption, in Base64 format. If not provided, will attempt to extract from the EPUB file.
+        /// This is usually returned during the fulfilment process
+        #[arg(short, long)]
+        encrypted_key: Option<String>,
     },
     /// Decrypt an entire EPUB file, removing all DRM
     DecryptEpub {
@@ -61,6 +66,11 @@ enum Commands {
         /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
         #[arg(short, long)]
         key: Option<PathBuf>,
+
+        /// Encrypted key to use for decryption, in Base64 format. If not provided, will attempt to extract from the EPUB file.
+        /// This is usually returned during the fulfilment process
+        #[arg(short, long)]
+        encrypted_key: Option<String>,
     },
     /// Fetch an encrypted EPUB from an operator based on an ACSM file
     FetchEpub {
@@ -182,6 +192,7 @@ fn decrypt_file(
     file: &str,
     output: Option<PathBuf>,
     key: Option<PathBuf>,
+    encrypted_key: Option<String>,
 ) -> Result<()> {
     // Determine output path: use provided or extract filename from file path
     let output_path = if let Some(out) = output {
@@ -204,9 +215,18 @@ fn decrypt_file(
     // Get the RSA private key
     let keys: AdeptKey = load_keys(key)?;
 
-    // Extract the encrypted content key from the EPUB
-    println!("  Extracting content key from EPUB...");
-    let encrypted_content_key = extract_content_key(&epub)?;
+    let encrypted_content_key = match encrypted_key {
+        Some(enc_key) => {
+            println!("  Using provided encrypted key for decryption");
+            debug!("Encrypted key (Base64): {}", enc_key);
+            enc_key
+        }
+        None => {
+            // Extract the encrypted content key from the EPUB
+            println!("  Extracting content key from EPUB...");
+            extract_content_key(&epub)?
+        }
+    };
 
     // Decrypt the content key using RSA
     println!("  Decrypting content key...");
@@ -229,7 +249,12 @@ fn decrypt_file(
     Ok(())
 }
 
-fn decrypt_book(input: PathBuf, output: PathBuf, key: Option<PathBuf>) -> Result<()> {
+fn decrypt_book(
+    input: PathBuf,
+    output: PathBuf,
+    key: Option<PathBuf>,
+    encrypted_key: Option<String>,
+) -> Result<()> {
     println!("Decrypting entire EPUB...");
     println!("  Input: {}", input.display());
     println!("  Output: {}", output.display());
@@ -238,7 +263,7 @@ fn decrypt_book(input: PathBuf, output: PathBuf, key: Option<PathBuf>) -> Result
 
     // Decrypt the entire EPUB
     println!("  Decrypting files...");
-    let decrypted_count = decrypt_epub(&input, &output, &keys.private_license_key)?;
+    let decrypted_count = decrypt_epub(&input, &output, &keys.private_license_key, encrypted_key)?;
 
     println!("✓ Successfully decrypted EPUB");
     println!("  Decrypted {} files", decrypted_count);
@@ -292,8 +317,14 @@ fn main() -> Result<()> {
             file,
             output,
             key,
-        } => decrypt_file(epub, &file, output, key),
-        Commands::DecryptEpub { input, output, key } => decrypt_book(input, output, key),
+            encrypted_key,
+        } => decrypt_file(epub, &file, output, key, encrypted_key),
+        Commands::DecryptEpub {
+            input,
+            output,
+            key,
+            encrypted_key,
+        } => decrypt_book(input, output, key, encrypted_key),
         Commands::FetchEpub {
             acsm,
             output,
