@@ -504,3 +504,60 @@ fn license_certificate() -> Result<String> {
     }
     bail!("No license certificate found in registry");
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cpuid_vendor() {
+        let is_intel = cpu_vendor() == "GenuineIntel";
+        let is_amd = cpu_vendor() == "AuthenticAMD";
+        assert!(is_intel || is_amd, "Surprise CPU vendor: {}", cpu_vendor());
+    }
+
+    #[test]
+    fn test_cpuid_signature() {
+        let sig = cpu_signature();
+        assert_ne!(sig, 0, "CPU signature should not be zero");
+    }
+
+    #[test]
+    fn test_entropy_generation() {
+        let serial = volume_serial_number("C:\\").expect("wut");
+        assert_ne!(serial, 0, "Volume serial number should not be zero");
+
+        let entropy = device_entropy().expect("Failed to generate device entropy");
+        assert_eq!(entropy.len(), 32, "Device entropy should be 32 bytes");
+
+        assert_eq!(
+            &entropy[0..4],
+            &serial.to_be_bytes(),
+            "First 4 bytes of entropy should match volume serial number"
+        );
+        let vendor_bytes = &entropy[4..16];
+        let vendor_str = String::from_utf8_lossy(vendor_bytes);
+        assert_eq!(
+            vendor_str,
+            cpu_vendor(),
+            "Vendor string in entropy should match CPU vendor"
+        );
+
+        let signature = cpu_signature();
+        assert_eq!(0xb4_0f_40, signature);
+        assert_ne!(signature, 0, "CPU signature should not be zero");
+        // let signature_bytes = &entropy[16..19];
+        // assert_eq!(
+        //     signature_bytes,
+        //     &signature.to_be_bytes()[0..3],
+        //     "Signature bytes in entropy should match CPU signature"
+        // );
+
+        assert_eq!(entropy[16], 0xb4);
+        assert_eq!(entropy[17], 0x0f);
+        assert_eq!(entropy[18], 0x40);
+
+        let username = adobe_username().expect("Failed to get Adobe username");
+        assert_eq!(username.len(), 5);
+    }
+}

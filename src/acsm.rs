@@ -778,7 +778,7 @@ mod tests {
         assert_eq!(urls.len(), 1);
         assert_eq!(
             urls[0],
-            "http://fulfill.ebookscorporation.com/epub/210/2103/210397/210397260.epub"
+            "http://fulfill.ebookscorporation.com/epub/123/1234/123456/123456789.epub"
         );
     }
 }

@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<envelope xmlns="http://ns.adobe.com/adept">
+  <fulfillmentResult>
+    <fulfillment>9613dbdb-551d-4265-9b1d-2ecf4942bc31</fulfillment>
+    <returnable>false</returnable>
+    <initial>true</initial>
+    <notify>
+      <notifyURL>http://acs.ebookscorporation.com/fulfillment/FulfillmentNotification</notifyURL>
+      <body>
+        <fulfillment>9613dbdb-551d-4265-9b1d-2ecf4942bc31</fulfillment>
+        <transaction>EBC-123456789</transaction>
+        <user>urn:uuid:d998a7d2-3cd8-4b13-8ba0-22d3950e5bb8</user>
+        <fulfilled>true</fulfilled>
+        <returned>false</returned>
+      </body>
+    </notify>
+    <notify critical="no">
+      <notifyURL>https://www.ebooks.com/download/fulfillment/callback.aspx</notifyURL>
+      <body>
+        <fulfillment>9613dbdb-551d-4265-9b1d-2ecf4942bc31</fulfillment>
+        <transaction>EBC-237186930</transaction>
+        <user>urn:uuid:d998a7d2-3cd8-4b13-8ba0-22d3950e5bb8</user>
+        <fulfilled>true</fulfilled>
+        <returned>false</returned>
+        <hmac>BASE64_HMAC</hmac>
+      </body>
+    </notify>
+    <resourceItemInfo>
+      <resource>urn:uuid:e0000000-0000-0000-0000-000123467890</resource>
+      <resourceItem>1</resourceItem>
+      <metadata>
+        <dc:title xmlns:dc="http://purl.org/dc/elements/1.1/">Book Title</dc:title>
+        <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">Book Author</dc:creator>
+        <dc:format xmlns:dc="http://purl.org/dc/elements/1.1/">application/epub+zip</dc:format>
+        <dc:publisher xmlns:dc="http://purl.org/dc/elements/1.1/">Book Publisher</dc:publisher>
+        <dc:language xmlns:dc="http://purl.org/dc/elements/1.1/">en</dc:language>
+        <dc:description xmlns:dc="http://purl.org/dc/elements/1.1/">Book Description</dc:description>
+        <dc:identifier xmlns:dc="http://purl.org/dc/elements/1.1/">URN:ISBN:1234567891234</dc:identifier>
+        <modified>2022-12-02T14:14:47+00:00</modified>
+        <subscriptionid>urn:uuid:00000000-0000-0000-0000-000000000000</subscriptionid>
+        <price>0.0</price>
+        <epubver>3.0</epubver>
+      </metadata>
+      <src>http://fulfill.ebookscorporation.com/epub/123/1234/123456/123456789.epub</src>
+      <downloadType>simple</downloadType>
+      <licenseToken>
+        <user>urn:uuid:d998a7d2-3cd8-4b13-8ba0-22d3950e5bb8</user>
+        <resource>urn:uuid:e0000000-0000-0000-0000-000123467890</resource>
+        <resourceItemType>application/epub+zip</resourceItemType>
+        <deviceType>standalone</deviceType>
+        <device>urn:uuid:a69fd2ee-8b78-4410-a1a1-8c782e379fb7</device>
+        <voucher>e0000000-0000-0000-0000-000123467890</voucher>
+        <licenseURL>https://nasigningservice.adobe.com/licensesign</licenseURL>
+        <operatorURL>http://acs.ebookscorporation.com/fulfillment</operatorURL>
+        <fulfillment>9613dbdb-551d-4265-9b1d-2ecf4942bc31</fulfillment>
+        <distributor>urn:uuid:da39a8bb-f998-4f50-8d4f-690fa748cdde</distributor>
+        <encryptedKey keyInfo="user">ANzU2mTY3r6xcHpmGTD/gB55GVJhy2CO5MR0Qg/98g/msNfgNyRVF50cuG31AsKVMEZfQoMWV+YxJBoNkvXO+4fTBoRMYErhW5eMZhL3CfPKUEfhsgoB7Nfh6f4410cvLKA7h5OIoph5tdE/igUtNTB0w5HN/p7PtDyhOuoEVxU=</encryptedKey>
+        <model version="1.0">2817</model>
+        <permissions>
+          <display/>
+          <play/>
+        </permissions>
+        <signature>BASE64_RSA_SIGNATURE</signature>
+      </licenseToken>
+    </resourceItemInfo>
+  </fulfillmentResult>
+</envelope>
