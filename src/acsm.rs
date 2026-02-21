@@ -697,10 +697,9 @@ mod tests {
         let xml = generate_fulfill_request(&acsm_info, user, device, fingerprint);
 
         // Load device key
-        let device_key_bytes =
-            std::fs::read("src/testdata/adept_key.der").expect("Failed to read device_key.der");
+        let device_key_bytes = include_bytes!("testdata/adept_key.der");
         let private_key =
-            RsaPrivateKey::from_pkcs1_der(&device_key_bytes).expect("Failed to parse device key");
+            RsaPrivateKey::from_pkcs1_der(device_key_bytes).expect("Failed to parse device key");
 
         // Sign the request
         let signature = sign_fulfill_request(&xml, &private_key);
