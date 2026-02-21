@@ -178,6 +178,9 @@ pub fn adeptkeys() -> Result<AdeptKey> {
                 name: ("placeholder").to_string(),
                 device_key: aes_key_bytes.clone(),
                 private_auth_key: StorableRsaPrivateKey(pkcs),
+                fingerprint: adept_fingerprint()?,
+                user: adept_user()?,
+                device: adept_device()?,
             });
         }
     }

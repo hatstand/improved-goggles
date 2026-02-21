@@ -22,7 +22,6 @@ mod safe_strings;
 mod acsm;
 mod activation;
 mod adobe_hash;
-#[cfg(windows)]
 mod fetch;
 mod keys;
 mod rsa;
@@ -36,17 +35,24 @@ pub use acsm::{
 pub use activation::{parse_signin_response, parse_signin_xml, SignInData, SignInResponse};
 #[cfg(windows)]
 pub use adept_keys::{adept_device, adept_fingerprint, adept_user, adeptkeys};
-#[cfg(windows)]
-pub use fetch::fetch_epub;
+pub use fetch::{create_signin_request, fetch_epub};
 pub use keys::load_keys;
 pub use rsa::{decrypt_private_key_with_iv, StorableRsaPrivateKey};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AdeptKey {
+    // The AES key used to encrypt/decrypt other keys.
     pub device_key: Vec<u8>,
+    // The encryption key used to encrypt the content key in the EPUB. This is the key that corresponds to the `encryptedKey` in rights.xml.
     pub private_license_key: StorableRsaPrivateKey,
+    // The signing key used to sign requests to Adobe's servers (e.g., fulfillment requests).
     pub private_auth_key: StorableRsaPrivateKey,
     pub name: String,
+
+    // Device fingerprint, used for fulfilment requests.
+    pub fingerprint: String,
+    pub user: String,
+    pub device: String,
 }
 
 #[cfg(not(windows))]

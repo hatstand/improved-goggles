@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::debug;
 use rmpub::{
-    decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key_with_iv,
-    extract_content_key, load_keys, parse_signin_response, parse_signin_xml,
-    verify_fulfill_request, AdeptKey,
+    create_signin_request, decrypt_content_key, decrypt_epub, decrypt_epub_file,
+    decrypt_private_key_with_iv, extract_content_key, fetch_epub, load_keys, parse_signin_response,
+    parse_signin_xml, verify_fulfill_request, AdeptKey,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -14,7 +14,7 @@ use p12::PFX;
 use rsa::pkcs1::DecodeRsaPrivateKey;
 
 #[cfg(windows)]
-use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys, fetch_epub};
+use rmpub::{adept_device, adept_fingerprint, adept_user, adeptkeys};
 use rsa::traits::PublicKeyParts;
 
 #[derive(Parser)]
@@ -134,6 +134,14 @@ enum DebugCommands {
         #[arg(short, long)]
         key: Option<PathBuf>,
     },
+    GenerateSignInRequest {
+        /// Operator URL for the signIn request (e.g., Adobe activation server URL)
+        operator_url: String,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
+    },
 }
 
 fn extract_key(output: PathBuf) -> Result<()> {
@@ -230,17 +238,6 @@ fn decrypt_book(input: PathBuf, output: PathBuf, key: Option<PathBuf>) -> Result
     println!("  Output: {}", output.display());
 
     Ok(())
-}
-
-#[cfg(not(windows))]
-fn fetch_epub(
-    _acsm: PathBuf,
-    _output: PathBuf,
-    _dry_run: bool,
-    _key: Option<PathBuf>,
-) -> Result<()> {
-    use anyhow::bail;
-    bail!("FetchEpub requires registry access and is only available on Windows for now.");
 }
 
 fn main() -> Result<()> {
@@ -560,6 +557,20 @@ fn main() -> Result<()> {
                         println!("Failed to parse certificate: {:?}", e);
                     }
                 }
+
+                Ok(())
+            }
+            DebugCommands::GenerateSignInRequest { operator_url, key } => {
+                println!("Generating signIn request for operator: {}", operator_url);
+
+                let keys = load_keys(key)?;
+
+                // Generate the signIn request XML
+                let sign_in_request_xml = rmpub::create_signin_request(&operator_url, &keys)?;
+
+                println!("\n--- signIn Request XML ---");
+                println!("{}", sign_in_request_xml);
+                println!("--- End signIn Request XML ---\n");
 
                 Ok(())
             }
