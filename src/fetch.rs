@@ -3,7 +3,6 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use xml::writer::EmitterConfig;
 
 use crate::{
     generate_fulfill_request_minified, load_keys, parse_acsm, parse_fulfillment_response,
@@ -23,14 +22,12 @@ struct Credentials {
     authentication_certificate: String,
 }
 
-pub fn create_signin_request(operatorURL: &str, keys: &AdeptKey) -> Result<String> {
-    println!("Signing in to Adobe account at {}...", operatorURL);
-
+pub fn create_auth_request(keys: &AdeptKey) -> Result<String> {
     let creds = Credentials {
         user: keys.user.clone(),
-        certificate: keys.device.clone(),
-        license_certificate: keys.fingerprint.clone(),
-        authentication_certificate: keys.fingerprint.clone(),
+        certificate: keys.certificate.clone(),
+        license_certificate: keys.license_certificate.clone(),
+        authentication_certificate: keys.authentication_certificate.clone(),
     };
 
     let config = serde_xml_rs::SerdeXml::new()

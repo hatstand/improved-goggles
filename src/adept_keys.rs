@@ -11,6 +11,7 @@
 use std::arch::x86_64::__cpuid;
 
 use anyhow::{bail, Context, Result};
+use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use byteorder::{BigEndian, ByteOrder};
 use log::debug;
@@ -171,16 +172,19 @@ pub fn adeptkeys() -> Result<AdeptKey> {
         if ktype == "credentials" {
             let private_license_key =
                 private_license_key_from_registry_key(&subkey, &aes_key_bytes)?;
-            let (_, pkcs) = pkcs12_from_registry_key(&subkey, &aes_key_bytes)?;
+            let (cert, pkcs) = pkcs12_from_registry_key(&subkey, &aes_key_bytes)?;
 
             return Ok(AdeptKey {
                 private_license_key: StorableRsaPrivateKey(private_license_key),
                 name: ("placeholder").to_string(),
                 device_key: aes_key_bytes.clone(),
                 private_auth_key: StorableRsaPrivateKey(pkcs),
+                certificate: cert,
                 fingerprint: adept_fingerprint()?,
                 user: adept_user()?,
                 device: adept_device()?,
+                authentication_certificate: authentication_certificate()?,
+                license_certificate: license_certificate()?,
             });
         }
     }
@@ -205,17 +209,30 @@ fn pkcs12_from_registry_key(
             let keystore = p12_keystore::KeyStore::from_pkcs12(&data, &password)?;
             for (name, entry) in keystore.entries() {
                 println!("name: {} entry: {:?}", name, entry);
-                match entry {
-                    KeyStoreEntry::PrivateKeyChain(keychain) => {
-                        let rsa_key = RsaPrivateKey::from_pkcs8_der(keychain.key())?;
-                        return Ok((name.clone(), rsa_key));
-                    }
-                    _ => continue,
-                }
+                let (cert, key) = key_from_key_store_entry(entry)?;
+                return Ok((cert, key));
             }
         }
     }
     bail!("No pkcs12 found in registry");
+}
+
+fn key_from_key_store_entry(entry: &KeyStoreEntry) -> Result<(String, RsaPrivateKey)> {
+    match entry {
+        KeyStoreEntry::PrivateKeyChain(keychain) => {
+            let rsa_key = RsaPrivateKey::from_pkcs8_der(keychain.key())?;
+            let cert = keychain
+                .chain()
+                .first()
+                .map(|cert| {
+                    println!("Certificate in chain: {:?}", cert);
+                    BASE64_STANDARD.encode(cert.as_der())
+                })
+                .ok_or_else(|| anyhow::anyhow!("No certificate found in chain"))?;
+            Ok((cert, rsa_key))
+        }
+        _ => bail!("Expected a private key entry in the keystore"),
+    }
 }
 
 fn private_license_key_from_registry_key(
@@ -400,4 +417,90 @@ pub fn adept_fingerprint() -> Result<String> {
         }
     }
     bail!("No fingerprint found in registry");
+}
+
+fn authentication_certificate() -> Result<String> {
+    let adept_key = CURRENT_USER
+        .open(ADEPT_PATH)
+        .context("Adobe Adept registry key not found")?;
+    // Enumerate all subkeys under Software\Adobe\Adept\Activation
+    let subkey_names: Vec<String> = adept_key
+        .keys()
+        .context("Failed to enumerate registry keys")?
+        .collect();
+
+    for subkey_name in subkey_names {
+        debug!("Processing subkey for auth cert: {}", subkey_name);
+        // Open each subkey
+        let subkey = adept_key.open(&subkey_name)?;
+
+        // Get the default value (type)
+        let ktype = subkey.get_string("")?;
+
+        debug!("Subkey: {}  Type: {}", subkey_name, ktype);
+
+        // We're only interested in 'credentials' keys
+        if ktype == "credentials" {
+            // Enumerate sub-subkeys
+            let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+
+            for sub_subkey_name in sub_subkeys {
+                let sub_subkey = subkey.open(&sub_subkey_name)?;
+                let ktype2 = sub_subkey.get_string("")?;
+
+                debug!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
+
+                // Look for the authentication certificate key
+                if ktype2 == "authenticationCertificate" {
+                    let auth_cert_value = sub_subkey.get_string("value")?;
+                    debug!("    authentication certificate value: {}", auth_cert_value);
+                    return Ok(auth_cert_value);
+                }
+            }
+        }
+    }
+    bail!("No authentication certificate found in registry");
+}
+
+fn license_certificate() -> Result<String> {
+    let adept_key = CURRENT_USER
+        .open(ADEPT_PATH)
+        .context("Adobe Adept registry key not found")?;
+    // Enumerate all subkeys under Software\Adobe\Adept\Activation
+    let subkey_names: Vec<String> = adept_key
+        .keys()
+        .context("Failed to enumerate registry keys")?
+        .collect();
+
+    for subkey_name in subkey_names {
+        debug!("Processing subkey for auth cert: {}", subkey_name);
+        // Open each subkey
+        let subkey = adept_key.open(&subkey_name)?;
+
+        // Get the default value (type)
+        let ktype = subkey.get_string("")?;
+
+        debug!("Subkey: {}  Type: {}", subkey_name, ktype);
+
+        // We're only interested in 'credentials' keys
+        if ktype == "credentials" {
+            // Enumerate sub-subkeys
+            let sub_subkeys = subkey.keys()?.collect::<Vec<_>>();
+
+            for sub_subkey_name in sub_subkeys {
+                let sub_subkey = subkey.open(&sub_subkey_name)?;
+                let ktype2 = sub_subkey.get_string("")?;
+
+                debug!("  Sub-subkey: {}  Type: {}", sub_subkey_name, ktype2);
+
+                // Look for the license certificate key
+                if ktype2 == "licenseCertificate" {
+                    let license_cert_value = sub_subkey.get_string("value")?;
+                    debug!("    license certificate value: {}", license_cert_value);
+                    return Ok(license_cert_value);
+                }
+            }
+        }
+    }
+    bail!("No license certificate found in registry");
 }

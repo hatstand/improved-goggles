@@ -35,7 +35,7 @@ pub use acsm::{
 pub use activation::{parse_signin_response, parse_signin_xml, SignInData, SignInResponse};
 #[cfg(windows)]
 pub use adept_keys::{adept_device, adept_fingerprint, adept_user, adeptkeys};
-pub use fetch::{create_signin_request, fetch_epub};
+pub use fetch::{create_auth_request, fetch_epub};
 pub use keys::load_keys;
 pub use rsa::{decrypt_private_key_with_iv, StorableRsaPrivateKey};
 
@@ -47,12 +47,20 @@ pub struct AdeptKey {
     pub private_license_key: StorableRsaPrivateKey,
     // The signing key used to sign requests to Adobe's servers (e.g., fulfillment requests).
     pub private_auth_key: StorableRsaPrivateKey,
+    // The certificate corresponding to the private_auth_key, in Base64-encoded DER format. This is sent in the `certificate` field of the credentials XML when authenticating with Adobe's servers.
+    pub certificate: String,
     pub name: String,
 
     // Device fingerprint, used for fulfilment requests.
     pub fingerprint: String,
     pub user: String,
     pub device: String,
+
+    // The authentication certificate in its original Base64 encoding.
+    pub authentication_certificate: String,
+
+    // The license certificate in its original Base64 encoding.
+    pub license_certificate: String,
 }
 
 #[cfg(not(windows))]

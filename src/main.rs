@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use log::debug;
 use rmpub::{
-    create_signin_request, decrypt_content_key, decrypt_epub, decrypt_epub_file,
-    decrypt_private_key_with_iv, extract_content_key, fetch_epub, load_keys, parse_signin_response,
-    parse_signin_xml, verify_fulfill_request, AdeptKey,
+    decrypt_content_key, decrypt_epub, decrypt_epub_file, decrypt_private_key_with_iv,
+    extract_content_key, fetch_epub, load_keys, parse_signin_response, parse_signin_xml,
+    verify_fulfill_request, AdeptKey,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -79,6 +79,16 @@ enum Commands {
         #[arg(short, long)]
         key: Option<PathBuf>,
     },
+    /// Authenticate with an operator using device keys.
+    Auth {
+        /// URL of the operator's authentication endpoint (e.g., "http://acs.ebookscorporation.com/fulfillment/Auth") - used in the signIn request XML
+        /// Typically, the `operatorURL` from an ACSM file + `/Auth`.
+        operator_url: String,
+
+        /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
+        #[arg(short, long)]
+        key: Option<PathBuf>,
+    },
     /// Debug commands for development and troubleshooting
     Debug {
         #[command(subcommand)]
@@ -134,10 +144,7 @@ enum DebugCommands {
         #[arg(short, long)]
         key: Option<PathBuf>,
     },
-    GenerateSignInRequest {
-        /// Operator URL for the signIn request (e.g., Adobe activation server URL)
-        operator_url: String,
-
+    GenerateAuthRequest {
         /// Path to a pre-extracted device key file (DER format). If not provided, will extract from registry.
         #[arg(short, long)]
         key: Option<PathBuf>,
@@ -240,6 +247,40 @@ fn decrypt_book(input: PathBuf, output: PathBuf, key: Option<PathBuf>) -> Result
     Ok(())
 }
 
+fn auth(operator_url: String, key: Option<PathBuf>) -> Result<()> {
+    println!("Generating auth request for operator: {}", operator_url);
+
+    let keys = load_keys(key)?;
+
+    // Generate the auth request XML
+    let auth_request_xml = rmpub::create_auth_request(&keys)?;
+
+    println!("\n--- auth Request XML ---");
+    println!("{}", auth_request_xml);
+    println!("--- End auth Request XML ---\n");
+
+    let client = reqwest::blocking::Client::new();
+    println!("Sending auth request to operator...");
+
+    let response = client
+        .post(&operator_url)
+        .header("Content-Type", "application/vnd.adobe.adept+xml")
+        .header("User-Agent", "book2png")
+        .header("Accept", "*/*")
+        .body(auth_request_xml.clone())
+        .send()
+        .with_context(|| format!("Failed to send auth request to {}", operator_url))?;
+    let status = response.status();
+    println!("Received response with status: {}", status);
+
+    let response_text = response
+        .text()
+        .context("Failed to read auth response body")?;
+    println!("Response body:\n{}", response_text);
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
@@ -259,6 +300,7 @@ fn main() -> Result<()> {
             dry_run,
             key,
         } => fetch_epub(acsm, output, dry_run, key),
+        Commands::Auth { operator_url, key } => auth(operator_url, key),
         Commands::Debug { command } => match command {
             DebugCommands::ExtractUser => {
                 #[cfg(not(windows))]
@@ -560,16 +602,16 @@ fn main() -> Result<()> {
 
                 Ok(())
             }
-            DebugCommands::GenerateSignInRequest { operator_url, key } => {
-                println!("Generating signIn request for operator: {}", operator_url);
+            DebugCommands::GenerateAuthRequest { key } => {
+                println!("Generating auth request...");
 
                 let keys = load_keys(key)?;
 
-                // Generate the signIn request XML
-                let sign_in_request_xml = rmpub::create_signin_request(&operator_url, &keys)?;
+                // Generate the auth request XML
+                let auth_request_xml = rmpub::create_auth_request(&keys)?;
 
                 println!("\n--- signIn Request XML ---");
-                println!("{}", sign_in_request_xml);
+                println!("{}", auth_request_xml);
                 println!("--- End signIn Request XML ---\n");
 
                 Ok(())
