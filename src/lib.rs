@@ -29,8 +29,8 @@ mod rsa;
 
 // Re-export public API
 pub use acsm::{
-    generate_fulfill_request, generate_fulfill_request_minified, generate_target_device,
-    parse_acsm, parse_fulfillment_response, sign_fulfill_request, verify_fulfill_request, AcsmInfo,
+    extract_download_urls, generate_fulfill_request, generate_fulfill_request_minified,
+    generate_target_device, parse_acsm, sign_fulfill_request, verify_fulfill_request, AcsmInfo,
     AcsmLicenseToken, AcsmMetadata, AcsmPermissions,
 };
 pub use activation::{parse_signin_response, parse_signin_xml, SignInData, SignInResponse};
@@ -115,6 +115,24 @@ pub fn extract_content_key<P: AsRef<Path>>(epub_path: P) -> Result<String> {
         .and_then(|n| n.text())
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow!("encryptedKey tag not found in rights.xml"))
+}
+
+pub fn extract_content_key_from_fulfilment(response_xml: &str) -> Result<String> {
+    // Parse XML and find the encryptedKey tag
+    let doc =
+        roxmltree::Document::parse(response_xml).context("Failed to parse fulfillment XML")?;
+
+    // Find the encryptedKey element and return its text content
+    let r = doc
+        .descendants()
+        .find(|n| n.has_tag_name("encryptedKey"))
+        .and_then(|n| n.text())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("encryptedKey tag not found in fulfillment XML"))?;
+    if r.is_empty() {
+        bail!("encryptedKey tag found in fulfillment XML but it is empty");
+    }
+    Ok(r)
 }
 
 /// Decrypts an encrypted key from an EPUB using an RSA private key.
@@ -429,5 +447,13 @@ mod tests {
 
         let username = adobe_username().expect("Failed to get Adobe username");
         assert_eq!(username.len(), 5);
+    }
+
+    #[test]
+    fn test_extract_content_key_from_fulfilment() -> Result<()> {
+        let sample_data = include_str!("testdata/fulfill.xml");
+        let encrypted_key = extract_content_key_from_fulfilment(&sample_data)?;
+        assert_eq!(encrypted_key, "ANzU2mTY3r6xcHpmGTD/gB55GVJhy2CO5MR0Qg/98g/msNfgNyRVF50cuG31AsKVMEZfQoMWV+YxJBoNkvXO+4fTBoRMYErhW5eMZhL3CfPKUEfhsgoB7Nfh6f4410cvLKA7h5OIoph5tdE/igUtNTB0w5HN/p7PtDyhOuoEVxU=");
+        Ok(())
     }
 }

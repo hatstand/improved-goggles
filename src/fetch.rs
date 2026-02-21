@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
+use std::{fs, io::Write};
+use tempfile::NamedTempFile;
 
 use crate::{
-    generate_fulfill_request_minified, load_keys, parse_acsm, parse_fulfillment_response,
-    sign_fulfill_request, AdeptKey,
+    decrypt_epub, extract_content_key_from_fulfilment, extract_download_urls,
+    generate_fulfill_request_minified, load_keys, parse_acsm, sign_fulfill_request, AdeptKey,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -194,13 +195,14 @@ pub fn fetch_epub(
     println!("  ✓ Received fulfillment response");
 
     println!("  Parsing fulfillment response...");
-    let download_urls = parse_fulfillment_response(&response_text)?;
+    let download_urls = extract_download_urls(&response_text)?;
     println!("  ✓ Found {} download URL(s)", download_urls.len());
+
+    // Extract encrypted content key.
+    let encrypted_key = extract_content_key_from_fulfilment(&response_text)?;
 
     // Download the first EPUB file
     if let Some(epub_url) = download_urls.first() {
-        use std::fs;
-
         println!("  Downloading EPUB from {}...", epub_url);
 
         // Log EPUB download request
@@ -248,11 +250,22 @@ pub fn fetch_epub(
             epub_bytes.len()
         ));
 
-        fs::write(&output, &epub_bytes)?;
-
-        println!("✓ Successfully downloaded EPUB");
+        println!("✓ Successfully downloaded encrypted EPUB");
+        let mut temp = NamedTempFile::new()?;
+        temp.write_all(&epub_bytes)?;
+        temp.flush()?;
         println!("  Saved to: {}", output.display());
         println!("  Size: {} bytes", epub_bytes.len());
+
+        let size = decrypt_epub(
+            temp.path(),
+            &output,
+            &key.private_license_key,
+            Some(encrypted_key),
+        )?;
+        println!("✓ Successfully decrypted EPUB");
+        println!("  Saved to: {}", output.display());
+        println!("  Size: {} bytes", size);
     } else {
         use anyhow::bail;
         bail!("No download URLs found in fulfillment response");
